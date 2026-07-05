@@ -82,7 +82,8 @@
   --sidebar-accent-foreground: oklch(0.38 0.022 50);
   --sidebar-border: oklch(0.89 0.015 68);
   --sidebar-ring: oklch(0.68 0.02 55);
-  --dot-color: oklch(0.87 0.014 68);
+  --bg-dot-color: oklch(0.82 0.018 68);
+  --bg-grid-color: oklch(0.92 0.012 68);
 }
 
 .dark {

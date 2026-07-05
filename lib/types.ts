@@ -20,6 +20,11 @@ export type Stash = {
   updatedAt: string;
 };
 
+export type CreateItemInput = Pick<StashItem, "x" | "y" | "width" | "height"> &
+  Partial<Pick<StashItem, "name" | "imageDataUrl" | "link" | "notes">>;
+
+export type UpdateItemInput = Partial<Omit<StashItem, "id" | "createdAt">>;
+
 export const DEFAULT_ITEM_WIDTH = 220;
 export const DEFAULT_ITEM_HEIGHT = 260;
 

@@ -1,14 +1,15 @@
 import type { Metadata } from "next";
-import { Fraunces, JetBrains_Mono } from "next/font/google";
+import { Spectral, Overpass_Mono } from "next/font/google";
 import "./globals.css";
 
-const fraunces = Fraunces({
+const spectral = Spectral({
   variable: "--font-serif",
   subsets: ["latin"],
+  weight: ["300", "400", "500", "600"],
   style: ["normal", "italic"],
 });
 
-const jetbrainsMono = JetBrains_Mono({
+const overpassMono = Overpass_Mono({
   variable: "--font-mono",
   subsets: ["latin"],
 });
@@ -26,7 +27,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${fraunces.variable} ${jetbrainsMono.variable} h-full antialiased`}
+      className={`${spectral.variable} ${overpassMono.variable} h-full antialiased`}
     >
       <body className="flex h-full flex-col overflow-hidden">{children}</body>
     </html>
