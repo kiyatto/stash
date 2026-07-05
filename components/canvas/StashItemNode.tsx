@@ -31,25 +31,29 @@ export function StashItemNode({ data, selected }: NodeProps<StashFlowNode>) {
         lineClassName="!border-foreground/40"
         handleClassName="!h-2 !w-2 !rounded-full !border !border-foreground/60 !bg-background"
       />
-      <div
-        className={`flex h-full w-full cursor-pointer flex-col overflow-hidden rounded-lg border border-border bg-card text-card-foreground transition-colors hover:border-foreground/30 ${
-          selected ? "border-foreground/50" : ""
-        }`}
-      >
-        <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden bg-muted">
-          {item.imageDataUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={item.imageDataUrl}
-              alt={item.name || "Stash item"}
-              className="h-full w-full object-cover"
-              draggable={false}
-            />
-          ) : (
-            <ImageIcon className="h-7 w-7 stroke-[1.25] text-muted-foreground/35" />
-          )}
+      <div className="flex h-full w-full cursor-pointer flex-col gap-2.5 text-card-foreground">
+        <div
+          className={`relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg border bg-card shadow-sm transition-colors hover:border-foreground/30 ${
+            selected ? "border-foreground/50" : "border-border"
+          }`}
+        >
+          <div className="absolute inset-0 bg-muted">
+            {item.imageDataUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={item.imageDataUrl}
+                alt={item.name || "Stash item"}
+                className="h-full w-full object-cover"
+                draggable={false}
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center">
+                <ImageIcon className="h-7 w-7 stroke-[1.25] text-muted-foreground/35" />
+              </div>
+            )}
+          </div>
         </div>
-        <div className="flex shrink-0 flex-col gap-1 px-3.5 py-3">
+        <div className="flex shrink-0 flex-col gap-1 px-0.5">
           {item.link ? (
             <a
               href={item.link}

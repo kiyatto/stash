@@ -28,6 +28,7 @@ test.describe("stash canvas", () => {
 
     await expect(page.getByRole("dialog")).toBeVisible();
     await expect(page.getByText("New stash item")).toBeVisible();
+    await expect(page.getByLabel("Item name")).toBeVisible();
 
     await page.getByLabel("Item name").fill("Reading chair");
     await page.getByLabel("Link").fill("https://example.com/chair");
@@ -98,5 +99,40 @@ test.describe("stash canvas", () => {
     await expect(
       page.getByText("Click anywhere to add your first item")
     ).toBeHidden();
+  });
+
+  test("persists node position after drag", async ({ page }) => {
+    await page
+      .locator(".react-flow__pane")
+      .click({ position: { x: 400, y: 300 } });
+    await page.getByLabel("Item name").fill("Movable chair");
+    await page.getByRole("button", { name: "Save" }).click();
+    await expect(page.getByText("Movable chair")).toBeVisible();
+
+    const node = page.locator(".react-flow__node");
+    const box = await node.boundingBox();
+    if (!box) throw new Error("Expected stash node to be visible");
+
+    const positionBefore = await node.evaluate((el) => el.style.transform);
+
+    await page.mouse.move(box.x + 20, box.y + 20);
+    await page.mouse.down();
+    await page.mouse.move(box.x + 160, box.y + 100, { steps: 15 });
+    await page.mouse.up();
+
+    const positionAfterDrag = await node.evaluate((el) => el.style.transform);
+    expect(positionAfterDrag).not.toBe(positionBefore);
+
+    // Wait for debounced geometry persistence (400ms) plus buffer.
+    await page.waitForTimeout(600);
+
+    await page.reload();
+    await expect(page.getByText("Loading your stash...")).toBeHidden({
+      timeout: 15_000,
+    });
+    await expect(page.getByText("Movable chair")).toBeVisible();
+
+    const positionAfterReload = await node.evaluate((el) => el.style.transform);
+    expect(positionAfterReload).toBe(positionAfterDrag);
   });
 });

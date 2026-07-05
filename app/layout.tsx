@@ -27,9 +27,11 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${spectral.variable} ${overpassMono.variable} h-full antialiased`}
+      className={`${spectral.variable} ${overpassMono.variable} h-full min-h-dvh antialiased`}
     >
-      <body className="flex h-full flex-col overflow-hidden">{children}</body>
+      <body className="flex h-full min-h-dvh flex-col overflow-hidden">
+        {children}
+      </body>
     </html>
   );
 }

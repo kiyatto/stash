@@ -2,7 +2,7 @@
 
 import "@xyflow/react/dist/style.css";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ReactFlow,
   ReactFlowProvider,
@@ -13,7 +13,17 @@ import {
   useReactFlow,
   type NodeChange,
 } from "@xyflow/react";
-import { Grip, Grid2x2, Minus, PackageOpen, Plus, Scan } from "lucide-react";
+import {
+  AlertCircle,
+  Grip,
+  Grid2x2,
+  Loader2,
+  Minus,
+  PackageOpen,
+  Plus,
+  Scan,
+  X,
+} from "lucide-react";
 import {
   StashItemNode,
   type StashFlowNode,
@@ -22,7 +32,11 @@ import {
   StashItemModal,
   type StashItemFormValues,
 } from "@/components/canvas/StashItemModal";
-import { stashRepository } from "@/lib/storage/stashRepository";
+import { getStorageErrorMessage } from "@/lib/storage/errors";
+import {
+  StashItemsFullError,
+  stashRepository,
+} from "@/lib/storage/stashRepository";
 import {
   DEFAULT_ITEM_HEIGHT,
   DEFAULT_ITEM_WIDTH,
@@ -30,8 +44,14 @@ import {
   type Stash,
   type StashItem,
 } from "@/lib/types";
+import { Button } from "@/components/ui/button";
 
 const nodeTypes = { stashItem: StashItemNode };
+const GEOMETRY_PERSIST_DEBOUNCE_MS = 400;
+
+type GeometryUpdate = Partial<
+  Pick<StashItem, "x" | "y" | "width" | "height">
+>;
 
 type ModalState =
   | { mode: "create"; position: { x: number; y: number } }
@@ -71,19 +91,26 @@ function CanvasButton({
 function StashCanvasInner() {
   const [stash, setStash] = useState<Stash | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
   const [nodes, setNodes] = useState<StashFlowNode[]>([]);
   const [modalState, setModalState] = useState<ModalState>(null);
   const resizingRef = useRef(false);
+  const pendingGeometryRef = useRef(new Map<string, GeometryUpdate>());
+  const geometryTimersRef = useRef(
+    new Map<string, ReturnType<typeof setTimeout>>()
+  );
   const { screenToFlowPosition, zoomIn, zoomOut, fitView } = useReactFlow();
   const [bgVariant, setBgVariant] = useState<"dots" | "lines">("dots");
+
+  const handleStorageError = useCallback((err: unknown) => {
+    setError(getStorageErrorMessage(err));
+  }, []);
 
   function toggleBg() {
     setBgVariant((v) => (v === "dots" ? "lines" : "dots"));
   }
 
-  // Plain (hoisted) function declarations below intentionally avoid
-  // useCallback: applyStash and the resize handlers reference each other,
-  // and none of them need a stable identity for correctness here.
   function applyStash(updated: Stash) {
     setStash(updated);
     setNodes(
@@ -93,31 +120,94 @@ function StashCanvasInner() {
     );
   }
 
+  function flushGeometryPersist(itemId: string) {
+    const updates = pendingGeometryRef.current.get(itemId);
+    pendingGeometryRef.current.delete(itemId);
+    if (!updates) return;
+
+    setStash((prev) => {
+      if (!prev) return prev;
+      void stashRepository
+        .updateItem(prev, itemId, updates)
+        .then((updated) => {
+          applyStash(updated);
+          setError(null);
+        })
+        .catch(handleStorageError);
+      return prev;
+    });
+  }
+
+  function scheduleGeometryPersist(itemId: string, updates: GeometryUpdate) {
+    pendingGeometryRef.current.set(itemId, {
+      ...pendingGeometryRef.current.get(itemId),
+      ...updates,
+    });
+
+    const existing = geometryTimersRef.current.get(itemId);
+    if (existing) clearTimeout(existing);
+
+    geometryTimersRef.current.set(
+      itemId,
+      setTimeout(() => {
+        geometryTimersRef.current.delete(itemId);
+        flushGeometryPersist(itemId);
+      }, GEOMETRY_PERSIST_DEBOUNCE_MS)
+    );
+  }
+
   function handleResizeStart() {
     resizingRef.current = true;
   }
 
   function handleResizeEnd(itemId: string, width: number, height: number) {
     resizingRef.current = false;
-    setStash((prev) => {
-      if (!prev) return prev;
-      void stashRepository.updateItem(prev, itemId, { width, height }).then(applyStash);
-      return prev;
-    });
+    scheduleGeometryPersist(itemId, { width, height });
   }
+
+  const loadStash = useCallback(() => {
+    setLoading(true);
+    setLoadError(null);
+    stashRepository
+      .getOrCreateStash()
+      .then((loaded) => {
+        applyStash(loaded);
+        setError(null);
+      })
+      .catch((err) => {
+        setLoadError(getStorageErrorMessage(err));
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
-    stashRepository.getOrCreateStash().then((loaded) => {
-      if (cancelled) return;
-      applyStash(loaded);
-      setLoading(false);
-    });
+    setLoading(true);
+    stashRepository
+      .getOrCreateStash()
+      .then((loaded) => {
+        if (cancelled) return;
+        applyStash(loaded);
+        setError(null);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setLoadError(getStorageErrorMessage(err));
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
     return () => {
       cancelled = true;
+      for (const timer of geometryTimersRef.current.values()) {
+        clearTimeout(timer);
+      }
+      geometryTimersRef.current.clear();
+      pendingGeometryRef.current.clear();
     };
-    // Runs once on mount; applyStash is intentionally omitted since it's
-    // recreated every render but doesn't need to retrigger this fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -126,25 +216,20 @@ function StashCanvasInner() {
   }
 
   function onNodeDragStop(_event: unknown, node: StashFlowNode) {
-    setStash((prev) => {
-      if (!prev) return prev;
-      void stashRepository
-        .updateItem(prev, node.id, {
-          x: node.position.x,
-          y: node.position.y,
-        })
-        .then(applyStash);
-      return prev;
+    scheduleGeometryPersist(node.id, {
+      x: node.position.x,
+      y: node.position.y,
     });
   }
 
-  function onNodeClick(_event: unknown, node: StashFlowNode) {
-    if (resizingRef.current) return;
-    setModalState({ mode: "edit", item: node.data.item });
-  }
-
   function onPaneClick(event: React.MouseEvent) {
-    if (!stash || stash.items.length >= MAX_ITEMS_PER_STASH) return;
+    if (!stash) return;
+    if (stash.items.length >= MAX_ITEMS_PER_STASH) {
+      setError(
+        getStorageErrorMessage(new StashItemsFullError(MAX_ITEMS_PER_STASH))
+      );
+      return;
+    }
     const flowPosition = screenToFlowPosition({
       x: event.clientX,
       y: event.clientY,
@@ -156,6 +241,11 @@ function StashCanvasInner() {
         y: flowPosition.y - DEFAULT_ITEM_HEIGHT / 2,
       },
     });
+  }
+
+  function onNodeClick(_event: unknown, node: StashFlowNode) {
+    if (resizingRef.current) return;
+    setModalState({ mode: "edit", item: node.data.item });
   }
 
   function closeModal() {
@@ -173,40 +263,114 @@ function StashCanvasInner() {
           width: DEFAULT_ITEM_WIDTH,
           height: DEFAULT_ITEM_HEIGHT,
         })
-        .then(({ stash: updated }) => applyStash(updated));
+        .then(({ stash: updated }) => {
+          applyStash(updated);
+          setError(null);
+          setModalState(null);
+        })
+        .catch(handleStorageError);
     } else {
-      stashRepository.updateItem(stash, modalState.item.id, values).then(applyStash);
+      stashRepository
+        .updateItem(stash, modalState.item.id, values)
+        .then((updated) => {
+          applyStash(updated);
+          setError(null);
+          setModalState(null);
+        })
+        .catch(handleStorageError);
     }
-    setModalState(null);
   }
 
   function handleDelete() {
     if (!stash || modalState?.mode !== "edit") return;
-    stashRepository.deleteItem(stash, modalState.item.id).then(applyStash);
-    setModalState(null);
+    stashRepository
+      .deleteItem(stash, modalState.item.id)
+      .then((updated) => {
+        applyStash(updated);
+        setError(null);
+        setModalState(null);
+      })
+      .catch(handleStorageError);
   }
 
   if (loading) {
     return (
-      <div className="flex flex-1 items-center justify-center font-mono text-xs uppercase tracking-widest text-muted-foreground">
-        Loading your stash...
+      <div
+        className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground"
+        aria-busy="true"
+        aria-live="polite"
+      >
+        <Loader2 className="h-5 w-5 animate-spin stroke-[1.5]" />
+        <p className="font-mono text-xs uppercase tracking-widest">
+          Loading your stash...
+        </p>
       </div>
     );
   }
 
+  if (loadError) {
+    return (
+      <div
+        className="flex flex-1 flex-col items-center justify-center gap-4 px-6 text-center"
+        role="alert"
+      >
+        <AlertCircle className="h-8 w-8 stroke-[1.25] text-destructive" />
+        <p className="max-w-sm font-mono text-sm leading-relaxed text-muted-foreground">
+          {loadError}
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          className="font-mono text-xs uppercase tracking-wide"
+          onClick={loadStash}
+        >
+          Try again
+        </Button>
+      </div>
+    );
+  }
+
+  const isFull = (stash?.items.length ?? 0) >= MAX_ITEMS_PER_STASH;
+
   return (
-    <div className="relative flex-1">
+    <div className="relative h-full min-h-0 w-full flex-1">
+      {error ? (
+        <div
+          className="absolute inset-x-0 top-0 z-20 flex items-start gap-2 border-b border-destructive/20 bg-destructive/10 px-4 py-3"
+          role="alert"
+          aria-live="assertive"
+        >
+          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 stroke-[1.5] text-destructive" />
+          <p className="flex-1 font-mono text-xs leading-relaxed text-destructive">
+            {error}
+          </p>
+          <button
+            type="button"
+            onClick={() => setError(null)}
+            className="shrink-0 rounded p-0.5 text-destructive/70 hover:text-destructive"
+            aria-label="Dismiss error"
+          >
+            <X className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      ) : null}
+
       <ReactFlow
+        className="h-full w-full"
         nodes={nodes}
         edges={[]}
         nodeTypes={nodeTypes}
+        nodesConnectable={false}
         onNodesChange={onNodesChange}
         onNodeDragStop={onNodeDragStop}
-        onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
+        onNodeClick={onNodeClick}
         fitView={nodes.length > 0}
         minZoom={0.2}
         maxZoom={2}
+        zoomOnScroll={false}
+        panOnScroll
+        zoomOnPinch
         proOptions={{ hideAttribution: true }}
       >
         {bgVariant === "dots" ? (
@@ -241,12 +405,17 @@ function StashCanvasInner() {
           <CanvasButton onClick={() => zoomOut()} aria-label="Zoom out">
             <Minus className="h-3.5 w-3.5 stroke-[1.5]" />
           </CanvasButton>
-          <CanvasButton onClick={() => fitView({ padding: 0.2 })} aria-label="Fit view">
+          <CanvasButton
+            onClick={() => fitView({ padding: 0.2 })}
+            aria-label="Fit view"
+          >
             <Scan className="h-3.5 w-3.5 stroke-[1.5]" />
           </CanvasButton>
           <CanvasButton
             onClick={toggleBg}
-            aria-label={bgVariant === "dots" ? "Switch to grid" : "Switch to dots"}
+            aria-label={
+              bgVariant === "dots" ? "Switch to grid" : "Switch to dots"
+            }
           >
             {bgVariant === "dots" ? (
               <Grid2x2 className="h-3.5 w-3.5 stroke-[1.5]" />
@@ -265,6 +434,12 @@ function StashCanvasInner() {
               Click anywhere to add your first item
             </p>
           </div>
+        </div>
+      ) : isFull ? (
+        <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center px-4">
+          <p className="rounded-md border border-border/60 bg-background/90 px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground shadow-sm">
+            Stash full · delete an item to add more
+          </p>
         </div>
       ) : null}
 
