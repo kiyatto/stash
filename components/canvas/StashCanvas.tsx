@@ -184,7 +184,9 @@ function StashCanvasInner() {
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    const timers = geometryTimersRef.current;
+    const pending = pendingGeometryRef.current;
+
     stashRepository
       .getOrCreateStash()
       .then((loaded) => {
@@ -202,11 +204,11 @@ function StashCanvasInner() {
 
     return () => {
       cancelled = true;
-      for (const timer of geometryTimersRef.current.values()) {
+      for (const timer of timers.values()) {
         clearTimeout(timer);
       }
-      geometryTimersRef.current.clear();
-      pendingGeometryRef.current.clear();
+      timers.clear();
+      pending.clear();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
