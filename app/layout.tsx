@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Spectral, Overpass_Mono } from "next/font/google";
+import { AppHeader } from "@/components/layout/AppHeader";
 import "./globals.css";
 
 const spectral = Spectral({
@@ -30,7 +31,8 @@ export default function RootLayout({
       className={`${spectral.variable} ${overpassMono.variable} h-full min-h-dvh antialiased`}
     >
       <body className="flex h-full min-h-dvh flex-col overflow-hidden">
-        {children}
+        <AppHeader />
+        <main className="flex min-h-0 flex-1 flex-col">{children}</main>
       </body>
     </html>
   );

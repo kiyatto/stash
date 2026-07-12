@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextResponse } from "next/server";
+import { safeRedirectPath } from "@/lib/auth/routes";
 import type { Database } from "@/lib/supabase/database.types";
 import {
   getSupabasePublishableKey,
@@ -14,14 +15,13 @@ export async function GET(request: Request) {
 
   const { searchParams, origin } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("next") ?? "/";
+  const next = safeRedirectPath(searchParams.get("next"));
 
   if (!code) {
-    return NextResponse.redirect(`${origin}/?auth=missing_code`);
+    return NextResponse.redirect(`${origin}/login?error=missing_code`);
   }
 
-  const redirectTo = next.startsWith("/") ? next : "/";
-  const response = NextResponse.redirect(`${origin}${redirectTo}`);
+  const response = NextResponse.redirect(`${origin}${next}`);
 
   const supabase = createServerClient<Database>(
     getSupabaseUrl(),
@@ -43,7 +43,7 @@ export async function GET(request: Request) {
   const { error } = await supabase.auth.exchangeCodeForSession(code);
 
   if (error) {
-    return NextResponse.redirect(`${origin}/?auth=error`);
+    return NextResponse.redirect(`${origin}/login?error=auth`);
   }
 
   return response;

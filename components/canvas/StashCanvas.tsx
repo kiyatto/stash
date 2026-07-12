@@ -391,14 +391,9 @@ function StashCanvasInner() {
           />
         )}
         <Panel position="top-left" className="p-0">
-          <div className="flex flex-col gap-1">
-            <span className="font-serif text-base italic text-muted-foreground/70">
-              stash
-            </span>
-            <span className="font-mono text-[9px] uppercase tracking-widest text-muted-foreground/40">
-              Unsaved · kept 7 days
-            </span>
-          </div>
+          <span className="font-mono text-[9px] uppercase tracking-widest text-muted-foreground/40">
+            Unsaved · kept 7 days
+          </span>
         </Panel>
         <Panel position="bottom-left" className="flex flex-col gap-2 p-0">
           <CanvasButton onClick={() => zoomIn()} aria-label="Zoom in">

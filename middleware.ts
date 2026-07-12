@@ -9,7 +9,7 @@ export const config = {
   matcher: [
     /*
      * Match all request paths except static assets and images.
-     * Phase 2 will add route protection on top of this session refresh.
+     * Session refresh + auth redirects live in lib/supabase/middleware.ts.
      */
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
