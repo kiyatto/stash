@@ -35,7 +35,8 @@ import {
 import { getStorageErrorMessage } from "@/lib/storage/errors";
 import {
   StashItemsFullError,
-  stashRepository,
+  stashRepository as defaultStashRepository,
+  type StashRepository,
 } from "@/lib/storage/stashRepository";
 import {
   DEFAULT_ITEM_HEIGHT,
@@ -48,6 +49,14 @@ import { Button } from "@/components/ui/button";
 
 const nodeTypes = { stashItem: StashItemNode };
 const GEOMETRY_PERSIST_DEBOUNCE_MS = 400;
+const ANON_STATUS_LABEL = "Unsaved · kept 7 days";
+
+export type StashCanvasProps = {
+  /** Defaults to the IndexedDB anonymous repository. */
+  repository?: StashRepository;
+  /** Top-left persistence hint. */
+  statusLabel?: string;
+};
 
 type GeometryUpdate = Partial<
   Pick<StashItem, "x" | "y" | "width" | "height">
@@ -88,7 +97,11 @@ function CanvasButton({
   );
 }
 
-function StashCanvasInner() {
+function StashCanvasInner({
+  repository,
+  statusLabel = ANON_STATUS_LABEL,
+}: Required<Pick<StashCanvasProps, "repository">> &
+  Pick<StashCanvasProps, "statusLabel">) {
   const [stash, setStash] = useState<Stash | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -100,8 +113,13 @@ function StashCanvasInner() {
   const geometryTimersRef = useRef(
     new Map<string, ReturnType<typeof setTimeout>>()
   );
+  const repositoryRef = useRef(repository);
   const { screenToFlowPosition, zoomIn, zoomOut, fitView } = useReactFlow();
   const [bgVariant, setBgVariant] = useState<"dots" | "lines">("dots");
+
+  useEffect(() => {
+    repositoryRef.current = repository;
+  }, [repository]);
 
   const handleStorageError = useCallback((err: unknown) => {
     setError(getStorageErrorMessage(err));
@@ -127,7 +145,7 @@ function StashCanvasInner() {
 
     setStash((prev) => {
       if (!prev) return prev;
-      void stashRepository
+      void repositoryRef.current
         .updateItem(prev, itemId, updates)
         .then((updated) => {
           applyStash(updated);
@@ -168,7 +186,7 @@ function StashCanvasInner() {
   const loadStash = useCallback(() => {
     setLoading(true);
     setLoadError(null);
-    stashRepository
+    repositoryRef.current
       .getOrCreateStash()
       .then((loaded) => {
         applyStash(loaded);
@@ -187,7 +205,7 @@ function StashCanvasInner() {
     const timers = geometryTimersRef.current;
     const pending = pendingGeometryRef.current;
 
-    stashRepository
+    repositoryRef.current
       .getOrCreateStash()
       .then((loaded) => {
         if (cancelled) return;
@@ -257,7 +275,7 @@ function StashCanvasInner() {
   function handleSave(values: StashItemFormValues) {
     if (!stash || !modalState) return;
     if (modalState.mode === "create") {
-      stashRepository
+      repositoryRef.current
         .createItem(stash, {
           ...values,
           x: modalState.position.x,
@@ -272,7 +290,7 @@ function StashCanvasInner() {
         })
         .catch(handleStorageError);
     } else {
-      stashRepository
+      repositoryRef.current
         .updateItem(stash, modalState.item.id, values)
         .then((updated) => {
           applyStash(updated);
@@ -285,7 +303,7 @@ function StashCanvasInner() {
 
   function handleDelete() {
     if (!stash || modalState?.mode !== "edit") return;
-    stashRepository
+    repositoryRef.current
       .deleteItem(stash, modalState.item.id)
       .then((updated) => {
         applyStash(updated);
@@ -392,7 +410,7 @@ function StashCanvasInner() {
         )}
         <Panel position="top-left" className="p-0">
           <span className="font-mono text-[9px] uppercase tracking-widest text-muted-foreground/40">
-            Unsaved · kept 7 days
+            {statusLabel}
           </span>
         </Panel>
         <Panel position="bottom-left" className="flex flex-col gap-2 p-0">
@@ -459,10 +477,13 @@ function StashCanvasInner() {
   );
 }
 
-export function StashCanvas() {
+export function StashCanvas({
+  repository = defaultStashRepository,
+  statusLabel = ANON_STATUS_LABEL,
+}: StashCanvasProps = {}) {
   return (
     <ReactFlowProvider>
-      <StashCanvasInner />
+      <StashCanvasInner repository={repository} statusLabel={statusLabel} />
     </ReactFlowProvider>
   );
 }

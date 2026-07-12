@@ -3,6 +3,10 @@ import {
   StashItemsFullError,
   StorageQuotaError,
 } from "@/lib/storage/stashRepository";
+import {
+  StashLimitError,
+  StashNotFoundError,
+} from "@/lib/storage/ownedStashes";
 import { getStorageErrorMessage } from "@/lib/storage/errors";
 
 describe("getStorageErrorMessage", () => {
@@ -15,6 +19,18 @@ describe("getStorageErrorMessage", () => {
   it("returns an item-limit message", () => {
     expect(getStorageErrorMessage(new StashItemsFullError(50))).toMatch(
       /50 items/i
+    );
+  });
+
+  it("returns a stash-limit message", () => {
+    expect(getStorageErrorMessage(new StashLimitError(10))).toMatch(
+      /10 stashes/i
+    );
+  });
+
+  it("returns a not-found message", () => {
+    expect(getStorageErrorMessage(new StashNotFoundError("abc"))).toMatch(
+      /could not be found/i
     );
   });
 

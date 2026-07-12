@@ -12,8 +12,8 @@ export default function StashesPage() {
           Your stashes
         </h1>
         <p className="font-mono text-xs leading-relaxed text-muted-foreground">
-          The force-graph stash list arrives in a later phase. Server-backed
-          stashes will show up here once persistence is wired.
+          Server persistence is ready. The force-graph stash list (create,
+          open, rename) arrives in a later phase.
         </p>
       </div>
       <Link

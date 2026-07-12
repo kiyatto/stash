@@ -1,7 +1,10 @@
 export type StashItem = {
   id: string;
   name: string;
+  /** Local / preview image (data URL) or resolved public Storage URL for display. */
   imageDataUrl?: string;
+  /** Supabase Storage object path under `stash-images` (logged-in only). */
+  imagePath?: string;
   link?: string;
   notes?: string;
   x: number;
