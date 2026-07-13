@@ -10,8 +10,8 @@ export default async function SettingsPage() {
       <div className="flex flex-col gap-2">
         <h1 className="font-serif text-3xl italic text-foreground">Settings</h1>
         <p className="font-mono text-xs leading-relaxed text-muted-foreground">
-          Profile, avatar, and email changes land in a later phase. You can
-          sign out here.
+          Email and account deletion land in a later phase. Edit your display
+          name and avatar from the stashes graph. You can sign out here.
         </p>
       </div>
 

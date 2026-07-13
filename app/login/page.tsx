@@ -16,7 +16,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
     params.error === "missing_code"
       ? "That sign-in link was incomplete. Request a new one."
       : params.error === "auth"
-        ? "Sign-in failed. Request a new magic link and try again."
+        ? "Sign-in failed. Request a new link and try again."
         : null;
 
   return (
@@ -27,7 +27,7 @@ export default async function LoginPage({ searchParams }: LoginPageProps) {
             Sign in
           </h1>
           <p className="font-mono text-xs leading-relaxed text-muted-foreground">
-            Enter your email and we&apos;ll send a magic link — no password.
+            Enter your email and we&apos;ll send a link to login.
           </p>
         </div>
 

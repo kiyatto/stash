@@ -30,16 +30,21 @@ export type StashSummary = {
   name: string;
   createdAt: string;
   updatedAt: string;
+  itemCount: number;
 };
 
-function mapSummary(
-  row: Database["public"]["Tables"]["stashes"]["Row"]
-): StashSummary {
+type StashRowWithCount = Database["public"]["Tables"]["stashes"]["Row"] & {
+  stash_items?: { count: number }[] | null;
+};
+
+function mapSummary(row: StashRowWithCount): StashSummary {
+  const countEntry = row.stash_items?.[0];
   return {
     id: row.id,
     name: row.name,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    itemCount: countEntry?.count ?? 0,
   };
 }
 
@@ -68,7 +73,7 @@ export async function listOwnedStashes(
 
   const { data, error } = await client
     .from("stashes")
-    .select("*")
+    .select("*, stash_items(count)")
     .eq("owner_id", userId)
     .order("updated_at", { ascending: false });
 
@@ -102,7 +107,7 @@ export async function createOwnedStash(
   const { data, error } = await client
     .from("stashes")
     .insert({ owner_id: userId, name: name.trim() || "My Stash" })
-    .select("*")
+    .select("*, stash_items(count)")
     .single();
 
   if (error) {
@@ -131,7 +136,7 @@ export async function renameOwnedStash(
     .update({ name: trimmed })
     .eq("id", stashId)
     .eq("owner_id", userId)
-    .select("*")
+    .select("*, stash_items(count)")
     .maybeSingle();
 
   if (error) {
@@ -182,7 +187,7 @@ export async function getOwnedStashRow(
 
   const { data, error } = await client
     .from("stashes")
-    .select("*")
+    .select("*, stash_items(count)")
     .eq("id", stashId)
     .eq("owner_id", userId)
     .maybeSingle();

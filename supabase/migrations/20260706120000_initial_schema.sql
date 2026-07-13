@@ -205,11 +205,24 @@ create policy "profiles_select_own"
   to authenticated
   using (auth.uid() = id);
 
+create policy "profiles_insert_own"
+  on public.profiles for insert
+  to authenticated
+  with check (auth.uid() = id);
+
 create policy "profiles_update_own"
   on public.profiles for update
   to authenticated
   using (auth.uid() = id)
   with check (auth.uid() = id);
+
+-- Backfill profiles for any users who signed up before this migration ran.
+insert into public.profiles (id, avatar_seed)
+select u.id, gen_random_uuid()::text
+from auth.users u
+where not exists (
+  select 1 from public.profiles p where p.id = u.id
+);
 
 -- stashes: owners have full access
 create policy "stashes_select_own"

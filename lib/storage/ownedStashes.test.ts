@@ -72,6 +72,7 @@ describe("ownedStashes", () => {
         name: "Alpha",
         createdAt: "2026-07-01T00:00:00.000Z",
         updatedAt: "2026-07-02T00:00:00.000Z",
+        itemCount: 0,
       },
     ]);
   });

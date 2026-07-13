@@ -61,7 +61,7 @@ export function LoginForm({ nextPath }: LoginFormProps) {
           Check your email
         </p>
         <p className="font-mono text-xs leading-relaxed text-muted-foreground">
-          We sent a magic link to{" "}
+          We sent a login link to{" "}
           <span className="text-foreground">{email.trim()}</span>. Open it on
           this device to finish signing in.
         </p>
@@ -124,7 +124,7 @@ export function LoginForm({ nextPath }: LoginFormProps) {
             Sending link…
           </>
         ) : (
-          "Send magic link"
+          "Send login link"
         )}
       </Button>
     </form>
