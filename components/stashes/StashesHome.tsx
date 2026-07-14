@@ -185,12 +185,6 @@ export function StashesHome() {
     <div className="relative flex min-h-0 flex-1 flex-col">
       <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-3 px-4 py-3">
         <div className="pointer-events-none">
-          <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground/50">
-            Your stashes
-          </p>
-          <p className="font-serif text-xl italic text-foreground">
-            {profile.display_name?.trim() || "Welcome"}
-          </p>
         </div>
         <div className="pointer-events-auto flex flex-col items-end gap-2">
           <Button

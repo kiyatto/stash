@@ -17,8 +17,15 @@ vi.mock("@/lib/storage/stashImages", async () => {
     ...actual,
     uploadStashImage: vi.fn(async () => "user-1/stash-1/item-1.jpg"),
     removeStashImage: vi.fn(async () => undefined),
-    getStashImagePublicUrl: (_client: unknown, path: string) =>
-      `https://example.supabase.co/storage/v1/object/public/stash-images/${path}`,
+    getStashImagePublicUrl: (
+      _client: unknown,
+      path: string,
+      version?: string | null
+    ) => {
+      const url = `https://example.supabase.co/storage/v1/object/public/stash-images/${path}`;
+      if (!version) return url;
+      return `${url}?v=${encodeURIComponent(version)}`;
+    },
   };
 });
 
@@ -145,6 +152,9 @@ describe("SupabaseStashRepository", () => {
     expect(stash.items[0]!.imagePath).toBe("user-1/stash-1/item-1.jpg");
     expect(stash.items[0]!.imageDataUrl).toContain(
       "stash-images/user-1/stash-1/item-1.jpg"
+    );
+    expect(stash.items[0]!.imageDataUrl).toContain(
+      `v=${encodeURIComponent("2026-07-01T00:00:00.000Z")}`
     );
   });
 

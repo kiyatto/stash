@@ -31,6 +31,9 @@ function createMockClient(handlers: {
       from: () => ({
         list: async () => ({ data: [], error: null }),
         remove: async () => ({ error: null }),
+        getPublicUrl: (path: string) => ({
+          data: { publicUrl: `https://example.test/${path}` },
+        }),
       }),
     },
   } as never;
@@ -50,6 +53,7 @@ describe("ownedStashes", () => {
         share_token: null,
         created_at: "2026-07-01T00:00:00.000Z",
         updated_at: "2026-07-02T00:00:00.000Z",
+        stash_items: [{ count: 2 }],
       },
     ];
 
@@ -72,7 +76,7 @@ describe("ownedStashes", () => {
         name: "Alpha",
         createdAt: "2026-07-01T00:00:00.000Z",
         updatedAt: "2026-07-02T00:00:00.000Z",
-        itemCount: 0,
+        itemCount: 2,
       },
     ]);
   });

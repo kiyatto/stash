@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImageIcon, Loader2, Trash2, X } from "lucide-react";
 import {
   Dialog,
@@ -39,6 +39,24 @@ const emptyValues: StashItemFormValues = {
   notes: "",
 };
 
+function imageFileFromClipboard(clipboardData: DataTransfer | null): File | null {
+  if (!clipboardData) return null;
+
+  for (const item of Array.from(clipboardData.items)) {
+    if (item.kind === "file" && item.type.startsWith("image/")) {
+      return item.getAsFile();
+    }
+  }
+
+  for (const file of Array.from(clipboardData.files)) {
+    if (file.type.startsWith("image/")) {
+      return file;
+    }
+  }
+
+  return null;
+}
+
 export function StashItemModal({
   open,
   mode,
@@ -62,19 +80,44 @@ export function StashItemModal({
   );
   const [isCompressing, setIsCompressing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const isCompressingRef = useRef(false);
 
-  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  async function applyImageFile(file: File) {
+    if (isCompressingRef.current) return;
+    isCompressingRef.current = true;
     setIsCompressing(true);
     try {
       const dataUrl = await compressImageFile(file);
       setValues((prev) => ({ ...prev, imageDataUrl: dataUrl }));
     } finally {
+      isCompressingRef.current = false;
       setIsCompressing(false);
+    }
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      await applyImageFile(file);
+    } finally {
       e.target.value = "";
     }
   }
+
+  useEffect(() => {
+    if (!open) return;
+
+    function handlePaste(event: ClipboardEvent) {
+      const file = imageFileFromClipboard(event.clipboardData);
+      if (!file) return;
+      event.preventDefault();
+      void applyImageFile(file);
+    }
+
+    window.addEventListener("paste", handlePaste);
+    return () => window.removeEventListener("paste", handlePaste);
+  }, [open]);
 
   function handleSave() {
     onSave({
@@ -99,7 +142,16 @@ export function StashItemModal({
             <Label className="font-mono text-[11px] font-normal uppercase tracking-widest text-muted-foreground">
               Image
             </Label>
-            <div className="relative flex h-36 w-full items-center justify-center overflow-hidden rounded-md border border-dashed border-border bg-muted">
+            <div
+              tabIndex={values.imageDataUrl || isCompressing ? undefined : 0}
+              role={values.imageDataUrl || isCompressing ? undefined : "group"}
+              aria-label={
+                values.imageDataUrl || isCompressing
+                  ? undefined
+                  : "Image drop zone. Paste an image or upload a file."
+              }
+              className="relative flex h-36 w-full items-center justify-center overflow-hidden rounded-md border border-dashed border-border bg-muted outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+            >
               {isCompressing ? (
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
               ) : values.imageDataUrl ? (
@@ -125,14 +177,30 @@ export function StashItemModal({
                   </button>
                 </>
               ) : (
-                <button
-                  type="button"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex flex-col items-center gap-1.5 font-mono text-[11px] uppercase tracking-wide text-muted-foreground hover:text-foreground"
-                >
-                  <ImageIcon className="h-5 w-5 stroke-[1.25]" />
-                  Click to upload
-                </button>
+                <div className="flex flex-col items-center gap-3 px-4 text-center">
+                  <ImageIcon className="h-5 w-5 stroke-[1.25] text-muted-foreground" />
+                  <p className="font-mono text-[11px] leading-relaxed text-muted-foreground">
+                    <span className="uppercase tracking-wide">Paste an image</span>
+                    <span className="mt-1 block normal-case tracking-normal text-muted-foreground/80">
+                      <kbd className="rounded border border-border bg-background px-1 py-0.5 font-mono text-[10px] text-foreground/80">
+                        ⌘V
+                      </kbd>
+                      {" / "}
+                      <kbd className="rounded border border-border bg-background px-1 py-0.5 font-mono text-[10px] text-foreground/80">
+                        Ctrl+V
+                      </kbd>
+                    </span>
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="font-mono text-[10px] uppercase tracking-widest"
+                    onClick={() => fileInputRef.current?.click()}
+                  >
+                    Upload file
+                  </Button>
+                </div>
               )}
             </div>
             <input

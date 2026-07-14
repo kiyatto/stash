@@ -30,7 +30,7 @@ function mapItem(row: StashItemRow, client: Client): StashItem {
     name: row.name,
     imagePath,
     imageDataUrl: imagePath
-      ? getStashImagePublicUrl(client, imagePath)
+      ? getStashImagePublicUrl(client, imagePath, row.updated_at)
       : undefined,
     link: row.link ?? undefined,
     notes: row.notes ?? undefined,

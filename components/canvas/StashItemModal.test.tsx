@@ -113,6 +113,50 @@ describe("StashItemModal", () => {
     expect(screen.getByAltText("Preview")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Remove image" }));
     expect(screen.queryByAltText("Preview")).not.toBeInTheDocument();
-    expect(screen.getByText("Click to upload")).toBeInTheDocument();
+    expect(screen.getByText(/Paste image/i)).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Upload file" })
+    ).toBeInTheDocument();
+  });
+
+  it("accepts a pasted image from the clipboard", async () => {
+    const { compressImageFile } = await import("@/lib/image");
+
+    render(
+      <StashItemModal
+        open
+        mode="create"
+        onClose={vi.fn()}
+        onSave={vi.fn()}
+      />
+    );
+
+    const file = new File(["fake-image"], "pasted.png", { type: "image/png" });
+    const clipboardData = {
+      items: [
+        {
+          kind: "file",
+          type: "image/png",
+          getAsFile: () => file,
+        },
+      ],
+      files: [file],
+    };
+
+    window.dispatchEvent(
+      new Event("paste", { bubbles: true, cancelable: true })
+    );
+    // jsdom ClipboardEvent support is limited; drive the listener path directly.
+    const pasteEvent = new Event("paste", {
+      bubbles: true,
+      cancelable: true,
+    }) as ClipboardEvent;
+    Object.defineProperty(pasteEvent, "clipboardData", {
+      value: clipboardData,
+    });
+    window.dispatchEvent(pasteEvent);
+
+    expect(compressImageFile).toHaveBeenCalledWith(file);
+    expect(await screen.findByAltText("Preview")).toBeInTheDocument();
   });
 });

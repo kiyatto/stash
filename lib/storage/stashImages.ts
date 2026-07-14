@@ -43,11 +43,19 @@ export function dataUrlToBlob(dataUrl: string): { blob: Blob; ext: string } {
   return { blob, ext };
 }
 
-export function getStashImagePublicUrl(client: Client, path: string): string {
+export function getStashImagePublicUrl(
+  client: Client,
+  path: string,
+  version?: string | null
+): string {
   const { data } = client.storage
     .from(STORAGE_BUCKETS.stashImages)
     .getPublicUrl(path);
-  return data.publicUrl;
+  const url = data.publicUrl;
+  // Image paths are stable (upserted in place), so bust browser/CDN caches on replace.
+  if (!version) return url;
+  const sep = url.includes("?") ? "&" : "?";
+  return `${url}${sep}v=${encodeURIComponent(version)}`;
 }
 
 export async function uploadStashImage(
