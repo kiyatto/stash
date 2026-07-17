@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { Profile } from "@/lib/supabase/database.types";
-import { getAvatarPublicUrl, seedToGradient } from "@/lib/supabase/profile";
+import { getAvatarPublicUrl, seedToColor } from "@/lib/supabase/profile";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 
@@ -44,7 +44,7 @@ function ProfileEditorForm({
   const [error, setError] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const avatarUrl = getAvatarPublicUrl(client, profile.avatar_url);
-  const gradient = seedToGradient(profile.avatar_seed);
+  const fallbackColor = seedToColor(profile.avatar_seed);
 
   async function handleSave() {
     setBusy(true);
@@ -104,7 +104,7 @@ function ProfileEditorForm({
             avatarUrl
               ? undefined
               : {
-                  background: `linear-gradient(135deg, ${gradient.from}, ${gradient.to})`,
+                  backgroundColor: fallbackColor,
                 }
           }
         >

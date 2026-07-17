@@ -2,8 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { seedToGradient } from "@/lib/supabase/profile";
+import { seedToColor } from "@/lib/supabase/profile";
 import type { StashSummary } from "@/lib/storage/ownedStashes";
+import {
+  cartesianToPolar,
+  loadGraphLayout,
+  normalizeGraphLayout,
+  polarToCartesian,
+  resolveStashHomes,
+  saveGraphLayout,
+  syncGraphLayoutOrder,
+  type GraphLayoutState,
+} from "@/lib/storage/graphLayout";
 
 const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
   ssr: false,
@@ -11,18 +21,31 @@ const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
 
 const PROFILE_ID = "__profile__";
 const PROFILE_NODE_SIZE = 40;
-const STASH_NODE_SIZE = 44;
+const STASH_NODE_SIZE = 58;
+const STASH_NODE_RADIUS = 17;
 /** Extra hit/paint band below the card for the title label. */
-const LABEL_HIT_HEIGHT = 22;
+const LABEL_HIT_HEIGHT = 28;
 const LABEL_HIT_PAD_X = 14;
 const DEFAULT_GRAPH_ZOOM = 0.72;
 /** Soft spring toward each node's rest position (updated on stash drag-end). */
-const HOME_FORCE_STRENGTH = 0.08;
-const CHARGE_STRENGTH = -40;
-const LINK_STRENGTH = 0.45;
-const COLLISION_DISTANCE = STASH_NODE_SIZE + 20;
-const VELOCITY_DECAY = 0.3;
+const HOME_FORCE_STRENGTH = 0.12;
+const CHARGE_STRENGTH = -28;
+/** Links are visual only — home positions own the rest distance. */
+const LINK_STRENGTH = 0;
+/** Keep profile↔stash and stash↔stash from resting on top of each other. */
+const COLLISION_PADDING = 36;
+/** Lower decay = longer spring overshoot after drag. */
+const VELOCITY_DECAY = 0.25;
 const VIEW_MARGIN = 72;
+
+function nodeRadius(node: GraphNode): number {
+  return (node.kind === "profile" ? PROFILE_NODE_SIZE : STASH_NODE_SIZE) / 2;
+}
+
+function stashLabelHitWidth(node: GraphNode): number {
+  const label = node.label || "Untitled";
+  return Math.max(STASH_NODE_SIZE + LABEL_HIT_PAD_X * 2, label.length * 9 + 16);
+}
 
 export type GraphProfile = {
   displayName: string;
@@ -54,6 +77,7 @@ type GraphLink = {
 };
 
 type StashesForceGraphProps = {
+  userId: string;
   profile: GraphProfile;
   stashes: StashSummary[];
   width: number;
@@ -104,10 +128,11 @@ function createCollisionForce(): HomeForce {
         const dx = (b.x ?? 0) - (a.x ?? 0);
         const dy = (b.y ?? 0) - (a.y ?? 0);
         const distance = Math.hypot(dx, dy) || 0.01;
-        if (distance >= COLLISION_DISTANCE) continue;
+        const minDistance = nodeRadius(a) + nodeRadius(b) + COLLISION_PADDING;
+        if (distance >= minDistance) continue;
 
         const push =
-          ((COLLISION_DISTANCE - distance) / distance) * alpha * 0.35;
+          ((minDistance - distance) / distance) * alpha * 0.6;
         const pushX = dx * push;
         const pushY = dy * push;
         a.vx = (a.vx ?? 0) - pushX;
@@ -128,18 +153,6 @@ function createCollisionForce(): HomeForce {
 function layoutRadiusForViewport(width: number, height: number) {
   const half = Math.min(width, height) / (2 * DEFAULT_GRAPH_ZOOM);
   return Math.max(96, half - VIEW_MARGIN - STASH_NODE_SIZE);
-}
-
-function preferredStashHomes(
-  count: number,
-  radius: number
-): { x0: number; y0: number }[] {
-  if (count === 0) return [];
-  return Array.from({ length: count }, (_, i) => {
-    const angle = -Math.PI / 2 + (i * 2 * Math.PI) / count;
-    const r = radius * (0.92 + (i % 3) * 0.04);
-    return { x0: Math.cos(angle) * r, y0: Math.sin(angle) * r };
-  });
 }
 
 function roundRect(
@@ -189,6 +202,7 @@ function drawCoverImage(
 }
 
 export function StashesForceGraph({
+  userId,
   profile,
   stashes,
   width,
@@ -202,9 +216,24 @@ export function StashesForceGraph({
   const containerRef = useRef<HTMLDivElement>(null);
   const avatarImageRef = useRef<HTMLImageElement | null>(null);
   const [avatarReady, setAvatarReady] = useState(false);
+  const [layout, setLayout] = useState<GraphLayoutState>(() =>
+    loadGraphLayout(userId)
+  );
 
   const layoutRadius = layoutRadiusForViewport(width, height);
   const linkDistance = layoutRadius;
+  const stashIds = useMemo(() => stashes.map((stash) => stash.id), [stashes]);
+  const effectiveLayout = useMemo(
+    () => normalizeGraphLayout(syncGraphLayoutOrder(layout, stashIds)),
+    [layout, stashIds]
+  );
+  // Rebuild graph nodes only when membership/order changes — not when a drag
+  // saves polar homes. Replacing graphData mid-settle zeros velocity and kills bounce.
+  const layoutOrderKey = effectiveLayout.order.join("\0");
+
+  useEffect(() => {
+    saveGraphLayout(userId, effectiveLayout);
+  }, [userId, effectiveLayout]);
 
   useEffect(() => {
     if (!profile.avatarUrl) {
@@ -231,7 +260,7 @@ export function StashesForceGraph({
   }, [profile.avatarUrl]);
 
   const graphData = useMemo(() => {
-    const homes = preferredStashHomes(stashes.length, layoutRadius);
+    const homes = resolveStashHomes(effectiveLayout, stashIds, layoutRadius);
     const nodes: GraphNode[] = [
       {
         id: PROFILE_ID,
@@ -243,9 +272,14 @@ export function StashesForceGraph({
         y0: 0,
         x: 0,
         y: 0,
+        fx: 0,
+        fy: 0,
       },
-      ...stashes.map((stash, i) => {
-        const home = homes[i] ?? { x0: layoutRadius, y0: 0 };
+      ...stashes.map((stash) => {
+        const home = homes[stash.id] ?? {
+          x0: layoutRadius,
+          y0: 0,
+        };
         return {
           id: stash.id,
           kind: "stash" as const,
@@ -263,7 +297,17 @@ export function StashesForceGraph({
       target: stash.id,
     }));
     return { nodes, links };
-  }, [profile, stashes, layoutRadius]);
+    // effectiveLayout.positions intentionally omitted: drag updates x0/y0 in place.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see layoutOrderKey
+  }, [
+    profile.displayName,
+    profile.avatarUrl,
+    profile.avatarSeed,
+    stashes,
+    stashIds,
+    layoutRadius,
+    layoutOrderKey,
+  ]);
 
   const centerCamera = useCallback(() => {
     const fg = fgRef.current;
@@ -273,34 +317,62 @@ export function StashesForceGraph({
     fg.zoom?.(DEFAULT_GRAPH_ZOOM, 0);
   }, [width, height]);
 
-  useEffect(() => {
+  const applyForces = useCallback(() => {
     const fg = fgRef.current;
-    if (!fg || width <= 0 || height <= 0) return;
+    if (!fg?.d3Force || width <= 0 || height <= 0) return false;
 
-    fg.d3Force?.("center", null);
-    fg.d3Force?.("x", createHomeForce("x"));
-    fg.d3Force?.("y", createHomeForce("y"));
-    fg.d3Force?.("collide", createCollisionForce());
+    // Profile stays anchored; stash homes control edge length.
+    fg.d3Force("center", null);
+    fg.d3Force("x", createHomeForce("x"));
+    fg.d3Force("y", createHomeForce("y"));
+    fg.d3Force("collide", createCollisionForce());
 
-    const charge = fg.d3Force?.("charge");
+    const charge = fg.d3Force("charge");
     if (charge?.strength) charge.strength(CHARGE_STRENGTH);
 
-    const link = fg.d3Force?.("link");
+    const link = fg.d3Force("link");
     if (link?.distance) link.distance(linkDistance);
     if (link?.strength) link.strength(LINK_STRENGTH);
 
     fg.d3VelocityDecay?.(VELOCITY_DECAY);
     centerCamera();
     fg.d3ReheatSimulation?.();
+    return true;
+  }, [width, height, linkDistance, centerCamera]);
 
-    // Ref can attach a frame late with dynamic import.
-    const frame = requestAnimationFrame(() => centerCamera());
-    const timer = setTimeout(() => centerCamera(), 50);
-    return () => {
-      cancelAnimationFrame(frame);
-      clearTimeout(timer);
+  useEffect(() => {
+    if (width <= 0 || height <= 0) return;
+
+    let cancelled = false;
+    let attempts = 0;
+    let raf = 0;
+    let timer = 0;
+
+    // Dynamic import means fgRef is often null on the first effect pass.
+    const tryApply = () => {
+      if (cancelled) return;
+      if (applyForces()) {
+        raf = requestAnimationFrame(() => {
+          if (!cancelled) centerCamera();
+        });
+        timer = window.setTimeout(() => {
+          if (!cancelled) centerCamera();
+        }, 50);
+        return;
+      }
+      attempts += 1;
+      if (attempts < 120) {
+        raf = requestAnimationFrame(tryApply);
+      }
     };
-  }, [graphData, width, height, linkDistance, centerCamera]);
+
+    tryApply();
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(raf);
+      window.clearTimeout(timer);
+    };
+  }, [graphData, width, height, applyForces, centerCamera]);
 
   // Trackpad: two-finger scroll pans; pinch (ctrlKey wheel) zooms.
   // d3-zoom maps all wheel events to zoom by default, so we handle wheel ourselves.
@@ -350,31 +422,13 @@ export function StashesForceGraph({
 
       if (isProfile) {
         const seed = node.avatarSeed ?? "default";
-        const { from, to } = seedToGradient(seed);
-        const gradient = ctx.createLinearGradient(
-          x - half,
-          y - half,
-          x + half,
-          y + half
-        );
-        gradient.addColorStop(0, from);
-        gradient.addColorStop(1, to);
 
-        circlePath(ctx, x, y, half);
-        ctx.fillStyle = gradient;
+        // Solid fill only — no grain/texture (avoids banding on the avatar).
+        ctx.beginPath();
+        ctx.arc(x, y, half, 0, Math.PI * 2);
+        ctx.closePath();
+        ctx.fillStyle = seedToColor(seed);
         ctx.fill();
-
-        ctx.save();
-        circlePath(ctx, x, y, half);
-        ctx.clip();
-        ctx.globalAlpha = 0.12;
-        for (let i = 0; i < 40; i += 1) {
-          const gx = x - half + ((i * 17 + seed.length * 3) % size);
-          const gy = y - half + ((i * 29 + seed.charCodeAt(0)) % size);
-          ctx.fillStyle = i % 2 === 0 ? "#000" : "#fff";
-          ctx.fillRect(gx, gy, 2, 2);
-        }
-        ctx.restore();
 
         if (avatarReady && avatarImageRef.current && node.avatarUrl) {
           ctx.save();
@@ -384,23 +438,25 @@ export function StashesForceGraph({
           ctx.restore();
         }
 
+        ctx.beginPath();
+        ctx.arc(x, y, half, 0, Math.PI * 2);
+        ctx.closePath();
         ctx.lineWidth = 1.5 / globalScale;
         ctx.strokeStyle = "rgba(80, 60, 40, 0.35)";
-        circlePath(ctx, x, y, half);
         ctx.stroke();
       } else {
-        roundRect(ctx, x - half, y - half, size, size, 10);
+        roundRect(ctx, x - half, y - half, size, size, STASH_NODE_RADIUS);
         ctx.fillStyle = "rgba(255, 252, 247, 0.95)";
         ctx.fill();
 
-        const inset = 6;
+        const inset = 8;
         roundRect(
           ctx,
           x - half + inset,
           y - half + inset,
           size - inset * 2,
           size * 0.48,
-          5
+          10
         );
         ctx.fillStyle = "rgba(180, 160, 130, 0.22)";
         ctx.fill();
@@ -418,7 +474,7 @@ export function StashesForceGraph({
 
         ctx.lineWidth = 1.25 / globalScale;
         ctx.strokeStyle = "rgba(80, 60, 40, 0.22)";
-        roundRect(ctx, x - half, y - half, size, size, 10);
+        roundRect(ctx, x - half, y - half, size, size, STASH_NODE_RADIUS);
         ctx.stroke();
       }
 
@@ -427,18 +483,7 @@ export function StashesForceGraph({
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       const label = node.label || (isProfile ? "You" : "Untitled");
-      const maxWidth = size + 28;
-      let drawLabel = label;
-      if (ctx.measureText(drawLabel).width > maxWidth) {
-        while (
-          drawLabel.length > 1 &&
-          ctx.measureText(`${drawLabel}…`).width > maxWidth
-        ) {
-          drawLabel = drawLabel.slice(0, -1);
-        }
-        drawLabel = `${drawLabel}…`;
-      }
-      ctx.fillText(drawLabel, x, y + half + 5 / globalScale);
+      ctx.fillText(label, x, y + half + 5 / globalScale);
 
       ctx.restore();
     },
@@ -455,13 +500,14 @@ export function StashesForceGraph({
         circlePath(ctx, x, y, half);
       } else {
         // Include the title label under the card so label clicks register.
+        const hitWidth = stashLabelHitWidth(node);
         roundRect(
           ctx,
-          x - half - LABEL_HIT_PAD_X,
+          x - hitWidth / 2,
           y - half,
-          size + LABEL_HIT_PAD_X * 2,
+          hitWidth,
           size + LABEL_HIT_HEIGHT,
-          10
+          STASH_NODE_RADIUS
         );
       }
       ctx.fillStyle = color;
@@ -472,14 +518,19 @@ export function StashesForceGraph({
 
   function isStashLabelClick(node: GraphNode, event: MouseEvent): boolean {
     const fg = fgRef.current;
-    if (!fg?.screen2GraphCoords) return false;
-    const { x: gx, y: gy } = fg.screen2GraphCoords(event.clientX, event.clientY);
+    const container = containerRef.current;
+    if (!fg?.screen2GraphCoords || !container) return false;
+    const rect = container.getBoundingClientRect();
+    const { x: gx, y: gy } = fg.screen2GraphCoords(
+      event.clientX - rect.left,
+      event.clientY - rect.top
+    );
     const x = node.x ?? 0;
     const y = node.y ?? 0;
     const half = STASH_NODE_SIZE / 2;
     const labelTop = y + half;
     const labelBottom = y + half + LABEL_HIT_HEIGHT;
-    const labelHalfWidth = half + LABEL_HIT_PAD_X;
+    const labelHalfWidth = stashLabelHitWidth(node) / 2;
     return (
       gy >= labelTop &&
       gy <= labelBottom &&
@@ -516,15 +567,42 @@ export function StashesForceGraph({
         enablePanInteraction
         onNodeDragEnd={(node) => {
           const n = node as GraphNode;
-          // Library already clears fx/fy and cools alphaTarget for a natural settle.
-          // Update soft-home targets so stashes rest where dropped (You returns to center).
+          // Library clears fx/fy and cools alphaTarget; keep residual velocity so
+          // the soft home spring can overshoot and settle with bounce.
           if (n.kind === "profile") {
             n.x0 = 0;
             n.y0 = 0;
-          } else {
-            n.x0 = n.x ?? n.x0;
-            n.y0 = n.y ?? n.y0;
+            n.x = 0;
+            n.y = 0;
+            n.fx = 0;
+            n.fy = 0;
+            return;
           }
+
+          const x = n.x ?? n.x0;
+          const y = n.y ?? n.y0;
+          const polar = cartesianToPolar(x, y, layoutRadius);
+          const home = polarToCartesian(
+            polar.angle,
+            layoutRadius * polar.radiusRatio
+          );
+          // If dropped too close to the profile, spring back to the minimum
+          // edge length while preserving the user's chosen angle.
+          n.x0 = home.x0;
+          n.y0 = home.y0;
+
+          setLayout((prev) => {
+            const synced = syncGraphLayoutOrder(prev, stashIds);
+            const next: GraphLayoutState = {
+              ...synced,
+              positions: {
+                ...synced.positions,
+                [n.id]: polar,
+              },
+            };
+            saveGraphLayout(userId, next);
+            return next;
+          });
         }}
         onNodeClick={(node, event) => {
           const n = node as GraphNode;

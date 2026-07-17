@@ -161,19 +161,14 @@ export async function removeAvatar(client: Client): Promise<Profile> {
   return data;
 }
 
-/** Deterministic HSL colors from avatar_seed for grainy gradient fallback. */
-export function seedToGradient(seed: string): {
-  from: string;
-  to: string;
-} {
+/** Deterministic randomized fallback color from the profile's avatar seed. */
+export function seedToColor(seed: string): string {
   let hash = 0;
   for (let i = 0; i < seed.length; i += 1) {
     hash = (hash * 31 + seed.charCodeAt(i)) >>> 0;
   }
-  const h1 = hash % 360;
-  const h2 = (hash * 7) % 360;
-  return {
-    from: `hsl(${h1} 28% 72%)`,
-    to: `hsl(${h2} 22% 58%)`,
-  };
+  const hue = hash % 360;
+  const saturation = 34 + ((hash >>> 8) % 18);
+  const lightness = 62 + ((hash >>> 16) % 10);
+  return `hsl(${hue} ${saturation}% ${lightness}%)`;
 }

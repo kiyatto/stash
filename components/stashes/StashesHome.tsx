@@ -218,7 +218,8 @@ export function StashesHome() {
           </div>
         ) : null}
         <StashesForceGraph
-          key={graphProfile.avatarUrl ?? graphProfile.avatarSeed}
+          key={`${profile.id}-${graphProfile.avatarUrl ?? graphProfile.avatarSeed}`}
+          userId={profile.id}
           profile={graphProfile}
           stashes={stashes}
           width={size.width}
