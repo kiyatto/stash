@@ -24,7 +24,7 @@ describe("LoginForm", () => {
     render(<LoginForm nextPath="/stashes" />);
 
     await user.type(screen.getByLabelText("Email"), "you@example.com");
-    await user.click(screen.getByRole("button", { name: "Send magic link" }));
+    await user.click(screen.getByRole("button", { name: "Send login link" }));
 
     await waitFor(() => {
       expect(signInWithOtp).toHaveBeenCalledWith({
@@ -49,7 +49,7 @@ describe("LoginForm", () => {
     render(<LoginForm nextPath="/settings" />);
 
     await user.type(screen.getByLabelText("Email"), "you@example.com");
-    await user.click(screen.getByRole("button", { name: "Send magic link" }));
+    await user.click(screen.getByRole("button", { name: "Send login link" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Rate limit exceeded"

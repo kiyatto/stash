@@ -25,11 +25,6 @@ export function EditableStashName({
   const skipCommitRef = useRef(false);
 
   useEffect(() => {
-    setName(initialName);
-    setDraft(initialName);
-  }, [initialName]);
-
-  useEffect(() => {
     if (!editing) return;
     const input = inputRef.current;
     if (!input) return;

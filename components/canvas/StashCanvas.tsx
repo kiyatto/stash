@@ -46,16 +46,23 @@ import {
   type StashItem,
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
+import { ShareStashButton } from "@/components/stash/ShareStashDialog";
 
 const nodeTypes = { stashItem: StashItemNode };
 const GEOMETRY_PERSIST_DEBOUNCE_MS = 400;
 const ANON_STATUS_LABEL = "Unsaved · kept 7 days";
+const DEFAULT_CANVAS_ZOOM = 0.72;
+const FIT_VIEW_PADDING = 0.45;
 
 export type StashCanvasProps = {
   /** Defaults to the IndexedDB anonymous repository. */
   repository?: StashRepository;
   /** Top-left persistence hint. */
   statusLabel?: string;
+  /** Pan/zoom only — no create, edit, drag, or resize. */
+  readOnly?: boolean;
+  /** When set, shows a Share control at the bottom-right (owned canvas). */
+  shareStashId?: string;
 };
 
 type GeometryUpdate = Partial<
@@ -70,14 +77,17 @@ type ModalState =
 function itemToNode(
   item: StashItem,
   onResizeEnd: (itemId: string, width: number, height: number) => void,
-  onResizeStart: () => void
+  onResizeStart: () => void,
+  readOnly: boolean
 ): StashFlowNode {
   return {
     id: item.id,
     type: "stashItem",
     position: { x: item.x, y: item.y },
     style: { width: item.width, height: item.height },
-    data: { item, onResizeEnd, onResizeStart },
+    draggable: !readOnly,
+    selectable: !readOnly,
+    data: { item, onResizeEnd, onResizeStart, readOnly },
   };
 }
 
@@ -100,8 +110,10 @@ function CanvasButton({
 function StashCanvasInner({
   repository,
   statusLabel = ANON_STATUS_LABEL,
+  readOnly = false,
+  shareStashId,
 }: Required<Pick<StashCanvasProps, "repository">> &
-  Pick<StashCanvasProps, "statusLabel">) {
+  Pick<StashCanvasProps, "statusLabel" | "readOnly" | "shareStashId">) {
   const [stash, setStash] = useState<Stash | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -133,7 +145,7 @@ function StashCanvasInner({
     setStash(updated);
     setNodes(
       updated.items.map((item) =>
-        itemToNode(item, handleResizeEnd, handleResizeStart)
+        itemToNode(item, handleResizeEnd, handleResizeStart, readOnly)
       )
     );
   }
@@ -236,6 +248,7 @@ function StashCanvasInner({
   }
 
   function onNodeDragStop(_event: unknown, node: StashFlowNode) {
+    if (readOnly) return;
     scheduleGeometryPersist(node.id, {
       x: node.position.x,
       y: node.position.y,
@@ -243,7 +256,7 @@ function StashCanvasInner({
   }
 
   function onPaneClick(event: React.MouseEvent) {
-    if (!stash) return;
+    if (readOnly || !stash) return;
     if (stash.items.length >= MAX_ITEMS_PER_STASH) {
       setError(
         getStorageErrorMessage(new StashItemsFullError(MAX_ITEMS_PER_STASH))
@@ -264,7 +277,7 @@ function StashCanvasInner({
   }
 
   function onNodeClick(_event: unknown, node: StashFlowNode) {
-    if (resizingRef.current) return;
+    if (readOnly || resizingRef.current) return;
     setModalState({ mode: "edit", item: node.data.item });
   }
 
@@ -380,12 +393,19 @@ function StashCanvasInner({
         nodes={nodes}
         edges={[]}
         nodeTypes={nodeTypes}
+        nodesDraggable={!readOnly}
         nodesConnectable={false}
-        onNodesChange={onNodesChange}
-        onNodeDragStop={onNodeDragStop}
-        onPaneClick={onPaneClick}
-        onNodeClick={onNodeClick}
+        elementsSelectable={!readOnly}
+        onNodesChange={readOnly ? undefined : onNodesChange}
+        onNodeDragStop={readOnly ? undefined : onNodeDragStop}
+        onPaneClick={readOnly ? undefined : onPaneClick}
+        onNodeClick={readOnly ? undefined : onNodeClick}
         fitView={nodes.length > 0}
+        fitViewOptions={{
+          padding: FIT_VIEW_PADDING,
+          maxZoom: DEFAULT_CANVAS_ZOOM,
+        }}
+        defaultViewport={{ x: 0, y: 0, zoom: DEFAULT_CANVAS_ZOOM }}
         minZoom={0.2}
         maxZoom={2}
         zoomOnScroll={false}
@@ -421,7 +441,12 @@ function StashCanvasInner({
             <Minus className="h-3.5 w-3.5 stroke-[1.5]" />
           </CanvasButton>
           <CanvasButton
-            onClick={() => fitView({ padding: 0.2 })}
+            onClick={() =>
+              fitView({
+                padding: FIT_VIEW_PADDING,
+                maxZoom: DEFAULT_CANVAS_ZOOM,
+              })
+            }
             aria-label="Fit view"
           >
             <Scan className="h-3.5 w-3.5 stroke-[1.5]" />
@@ -439,6 +464,14 @@ function StashCanvasInner({
             )}
           </CanvasButton>
         </Panel>
+        {shareStashId && !readOnly ? (
+          <Panel position="bottom-right" className="p-0">
+            <ShareStashButton
+              stashId={shareStashId}
+              className="h-8 gap-1.5 rounded-lg border border-border/60 bg-card px-2.5 font-mono text-[10px] uppercase tracking-widest text-muted-foreground shadow-sm hover:border-border hover:text-foreground"
+            />
+          </Panel>
+        ) : null}
       </ReactFlow>
 
       {stash?.items.length === 0 ? (
@@ -446,11 +479,13 @@ function StashCanvasInner({
           <div className="flex flex-col items-center gap-3 text-center text-muted-foreground">
             <PackageOpen className="h-8 w-8 stroke-[1.25]" />
             <p className="font-mono text-xs uppercase tracking-widest">
-              Click anywhere to add your first item
+              {readOnly
+                ? "This shared stash is empty"
+                : "Click anywhere to add your first item"}
             </p>
           </div>
         </div>
-      ) : isFull ? (
+      ) : !readOnly && isFull ? (
         <div className="pointer-events-none absolute inset-x-0 bottom-6 flex justify-center px-4">
           <p className="rounded-md border border-border/60 bg-background/90 px-3 py-2 font-mono text-[10px] uppercase tracking-widest text-muted-foreground shadow-sm">
             Stash full · delete an item to add more
@@ -458,21 +493,23 @@ function StashCanvasInner({
         </div>
       ) : null}
 
-      <StashItemModal
-        key={
-          modalState === null
-            ? "closed"
-            : modalState.mode === "edit"
-              ? `edit-${modalState.item.id}`
-              : `create-${modalState.position.x}-${modalState.position.y}`
-        }
-        open={modalState !== null}
-        mode={modalState?.mode ?? "create"}
-        initialItem={modalState?.mode === "edit" ? modalState.item : null}
-        onClose={closeModal}
-        onSave={handleSave}
-        onDelete={modalState?.mode === "edit" ? handleDelete : undefined}
-      />
+      {!readOnly ? (
+        <StashItemModal
+          key={
+            modalState === null
+              ? "closed"
+              : modalState.mode === "edit"
+                ? `edit-${modalState.item.id}`
+                : `create-${modalState.position.x}-${modalState.position.y}`
+          }
+          open={modalState !== null}
+          mode={modalState?.mode ?? "create"}
+          initialItem={modalState?.mode === "edit" ? modalState.item : null}
+          onClose={closeModal}
+          onSave={handleSave}
+          onDelete={modalState?.mode === "edit" ? handleDelete : undefined}
+        />
+      ) : null}
     </div>
   );
 }
@@ -480,10 +517,17 @@ function StashCanvasInner({
 export function StashCanvas({
   repository = defaultStashRepository,
   statusLabel = ANON_STATUS_LABEL,
+  readOnly = false,
+  shareStashId,
 }: StashCanvasProps = {}) {
   return (
     <ReactFlowProvider>
-      <StashCanvasInner repository={repository} statusLabel={statusLabel} />
+      <StashCanvasInner
+        repository={repository}
+        statusLabel={statusLabel}
+        readOnly={readOnly}
+        shareStashId={shareStashId}
+      />
     </ReactFlowProvider>
   );
 }

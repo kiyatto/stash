@@ -27,6 +27,7 @@ export function StashPageHeader({ stashId, stashName }: StashPageHeaderProps) {
           Stashes
         </Link>
         <EditableStashName
+          key={`${stashId}-${stashName}`}
           stashId={stashId}
           initialName={stashName}
           className="min-w-0"

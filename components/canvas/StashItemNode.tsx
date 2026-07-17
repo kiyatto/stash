@@ -8,6 +8,7 @@ export type StashItemNodeData = {
   item: StashItem;
   onResizeEnd: (itemId: string, width: number, height: number) => void;
   onResizeStart: () => void;
+  readOnly?: boolean;
 };
 
 export type StashFlowNode = Node<StashItemNodeData, "stashItem">;
@@ -16,22 +17,28 @@ const MIN_WIDTH = 140;
 const MIN_HEIGHT = 120;
 
 export function StashItemNode({ data, selected }: NodeProps<StashFlowNode>) {
-  const { item, onResizeEnd, onResizeStart } = data;
+  const { item, onResizeEnd, onResizeStart, readOnly } = data;
 
   return (
     <div className="h-full w-full">
-      <NodeResizer
-        isVisible={selected}
-        minWidth={MIN_WIDTH}
-        minHeight={MIN_HEIGHT}
-        onResizeStart={onResizeStart}
-        onResizeEnd={(_, params) =>
-          onResizeEnd(item.id, params.width, params.height)
-        }
-        lineClassName="!border-foreground/40"
-        handleClassName="!h-2 !w-2 !rounded-full !border !border-foreground/60 !bg-background"
-      />
-      <div className="flex h-full w-full cursor-pointer flex-col gap-2.5 text-card-foreground">
+      {!readOnly ? (
+        <NodeResizer
+          isVisible={selected}
+          minWidth={MIN_WIDTH}
+          minHeight={MIN_HEIGHT}
+          onResizeStart={onResizeStart}
+          onResizeEnd={(_, params) =>
+            onResizeEnd(item.id, params.width, params.height)
+          }
+          lineClassName="!border-foreground/40"
+          handleClassName="!h-2 !w-2 !rounded-full !border !border-foreground/60 !bg-background"
+        />
+      ) : null}
+      <div
+        className={`flex h-full w-full flex-col gap-2.5 text-card-foreground ${
+          readOnly ? "cursor-default" : "cursor-pointer"
+        }`}
+      >
         <div
           className={`relative flex min-h-0 flex-1 items-center justify-center overflow-hidden rounded-lg border bg-card shadow-sm transition-colors hover:border-foreground/30 ${
             selected ? "border-foreground/50" : "border-border"

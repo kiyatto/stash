@@ -12,10 +12,15 @@ const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
 const PROFILE_ID = "__profile__";
 const PROFILE_NODE_SIZE = 40;
 const STASH_NODE_SIZE = 44;
+/** Extra hit/paint band below the card for the title label. */
+const LABEL_HIT_HEIGHT = 22;
+const LABEL_HIT_PAD_X = 14;
+const DEFAULT_GRAPH_ZOOM = 0.72;
 /** Soft spring toward each node's rest position (updated on stash drag-end). */
 const HOME_FORCE_STRENGTH = 0.08;
 const CHARGE_STRENGTH = -40;
 const LINK_STRENGTH = 0.45;
+const COLLISION_DISTANCE = STASH_NODE_SIZE + 20;
 const VELOCITY_DECAY = 0.3;
 const VIEW_MARGIN = 72;
 
@@ -84,8 +89,44 @@ function createHomeForce(axis: "x" | "y"): HomeForce {
   return force;
 }
 
+function createCollisionForce(): HomeForce {
+  let nodes: GraphNode[] = [];
+
+  const force = ((alpha: number) => {
+    for (let i = 0; i < nodes.length; i += 1) {
+      const a = nodes[i];
+      if (!a) continue;
+
+      for (let j = i + 1; j < nodes.length; j += 1) {
+        const b = nodes[j];
+        if (!b) continue;
+
+        const dx = (b.x ?? 0) - (a.x ?? 0);
+        const dy = (b.y ?? 0) - (a.y ?? 0);
+        const distance = Math.hypot(dx, dy) || 0.01;
+        if (distance >= COLLISION_DISTANCE) continue;
+
+        const push =
+          ((COLLISION_DISTANCE - distance) / distance) * alpha * 0.35;
+        const pushX = dx * push;
+        const pushY = dy * push;
+        a.vx = (a.vx ?? 0) - pushX;
+        a.vy = (a.vy ?? 0) - pushY;
+        b.vx = (b.vx ?? 0) + pushX;
+        b.vy = (b.vy ?? 0) + pushY;
+      }
+    }
+  }) as HomeForce;
+
+  force.initialize = (nextNodes) => {
+    nodes = nextNodes;
+  };
+
+  return force;
+}
+
 function layoutRadiusForViewport(width: number, height: number) {
-  const half = Math.min(width, height) / 2;
+  const half = Math.min(width, height) / (2 * DEFAULT_GRAPH_ZOOM);
   return Math.max(96, half - VIEW_MARGIN - STASH_NODE_SIZE);
 }
 
@@ -168,7 +209,6 @@ export function StashesForceGraph({
   useEffect(() => {
     if (!profile.avatarUrl) {
       avatarImageRef.current = null;
-      setAvatarReady(false);
       return;
     }
     let cancelled = false;
@@ -228,9 +268,9 @@ export function StashesForceGraph({
   const centerCamera = useCallback(() => {
     const fg = fgRef.current;
     if (!fg || width <= 0 || height <= 0) return;
-    // Layout radius already fits the viewport — keep a fixed camera.
+    // Keep nodes smaller by default and leave room for links and labels.
     fg.centerAt?.(0, 0, 0);
-    fg.zoom?.(1, 0);
+    fg.zoom?.(DEFAULT_GRAPH_ZOOM, 0);
   }, [width, height]);
 
   useEffect(() => {
@@ -240,6 +280,7 @@ export function StashesForceGraph({
     fg.d3Force?.("center", null);
     fg.d3Force?.("x", createHomeForce("x"));
     fg.d3Force?.("y", createHomeForce("y"));
+    fg.d3Force?.("collide", createCollisionForce());
 
     const charge = fg.d3Force?.("charge");
     if (charge?.strength) charge.strength(CHARGE_STRENGTH);
@@ -413,13 +454,39 @@ export function StashesForceGraph({
       if (node.kind === "profile") {
         circlePath(ctx, x, y, half);
       } else {
-        roundRect(ctx, x - half, y - half, size, size, 10);
+        // Include the title label under the card so label clicks register.
+        roundRect(
+          ctx,
+          x - half - LABEL_HIT_PAD_X,
+          y - half,
+          size + LABEL_HIT_PAD_X * 2,
+          size + LABEL_HIT_HEIGHT,
+          10
+        );
       }
       ctx.fillStyle = color;
       ctx.fill();
     },
     []
   );
+
+  function isStashLabelClick(node: GraphNode, event: MouseEvent): boolean {
+    const fg = fgRef.current;
+    if (!fg?.screen2GraphCoords) return false;
+    const { x: gx, y: gy } = fg.screen2GraphCoords(event.clientX, event.clientY);
+    const x = node.x ?? 0;
+    const y = node.y ?? 0;
+    const half = STASH_NODE_SIZE / 2;
+    const labelTop = y + half;
+    const labelBottom = y + half + LABEL_HIT_HEIGHT;
+    const labelHalfWidth = half + LABEL_HIT_PAD_X;
+    return (
+      gy >= labelTop &&
+      gy <= labelBottom &&
+      gx >= x - labelHalfWidth &&
+      gx <= x + labelHalfWidth
+    );
+  }
 
   if (width <= 0 || height <= 0) {
     return null;
@@ -440,8 +507,8 @@ export function StashesForceGraph({
         nodeCanvasObject={paintNode as never}
         nodeCanvasObjectMode={() => "replace"}
         nodePointerAreaPaint={paintPointerArea as never}
-        linkColor={() => "rgba(120, 100, 80, 0.28)"}
-        linkWidth={1.25}
+        linkColor={() => "rgba(105, 82, 60, 0.42)"}
+        linkWidth={1.5}
         d3VelocityDecay={VELOCITY_DECAY}
         cooldownTicks={Infinity}
         // Drag-pan on background; wheel handled above for trackpad pan + pinch zoom.
@@ -459,15 +526,17 @@ export function StashesForceGraph({
             n.y0 = n.y ?? n.y0;
           }
         }}
-        onNodeClick={(node) => {
+        onNodeClick={(node, event) => {
           const n = node as GraphNode;
-          if (n.kind === "profile") onProfileClick();
-          else onStashClick(n.id);
-        }}
-        onNodeRightClick={(node, event) => {
-          event.preventDefault();
-          const n = node as GraphNode;
-          if (n.kind === "stash") onStashRenameRequest(n.id);
+          if (n.kind === "profile") {
+            onProfileClick();
+            return;
+          }
+          if (isStashLabelClick(n, event)) {
+            onStashRenameRequest(n.id);
+            return;
+          }
+          onStashClick(n.id);
         }}
       />
     </div>

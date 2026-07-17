@@ -203,7 +203,7 @@ export function StashesHome() {
             </p>
           ) : (
             <p className="max-w-[14rem] text-right font-mono text-[10px] leading-relaxed text-muted-foreground/70">
-              Click a stash to open · right-click to rename
+              Click a stash to open · click its title to rename
             </p>
           )}
         </div>

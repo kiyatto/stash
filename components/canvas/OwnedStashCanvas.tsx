@@ -19,6 +19,7 @@ export function OwnedStashCanvas({ stashId }: OwnedStashCanvasProps) {
       key={stashId}
       repository={repository}
       statusLabel="Saved to your account"
+      shareStashId={stashId}
     />
   );
 }

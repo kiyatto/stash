@@ -113,7 +113,7 @@ describe("StashItemModal", () => {
     expect(screen.getByAltText("Preview")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "Remove image" }));
     expect(screen.queryByAltText("Preview")).not.toBeInTheDocument();
-    expect(screen.getByText(/Paste image/i)).toBeInTheDocument();
+    expect(screen.getByText(/Paste an image/i)).toBeInTheDocument();
     expect(
       screen.getByRole("button", { name: "Upload file" })
     ).toBeInTheDocument();
