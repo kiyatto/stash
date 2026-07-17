@@ -58,7 +58,32 @@ describe("ownedStashes", () => {
     ];
 
     const listClient = createMockClient({
-      from: () => {
+      from: (table: string) => {
+        if (table === "stash_items") {
+          const builder: Record<string, unknown> = {};
+          const self = () => builder;
+          builder.select = self;
+          builder.in = self;
+          builder.order = async () => ({
+            data: [
+              {
+                stash_id: "s1",
+                image_path: "user-1/s1/item-early.jpg",
+                updated_at: "2026-07-01T12:00:00.000Z",
+                created_at: "2026-07-01T10:00:00.000Z",
+              },
+              {
+                stash_id: "s1",
+                image_path: "user-1/s1/item-late.jpg",
+                updated_at: "2026-07-02T12:00:00.000Z",
+                created_at: "2026-07-02T10:00:00.000Z",
+              },
+            ],
+            error: null,
+          });
+          return builder;
+        }
+
         const result = { data: rows, error: null };
         const builder: Record<string, unknown> = {};
         const self = () => builder;
@@ -77,8 +102,63 @@ describe("ownedStashes", () => {
         createdAt: "2026-07-01T00:00:00.000Z",
         updatedAt: "2026-07-02T00:00:00.000Z",
         itemCount: 2,
+        previewImageUrl:
+          "https://example.test/user-1/s1/item-early.jpg?v=2026-07-01T12%3A00%3A00.000Z",
       },
     ]);
+  });
+
+  it("uses the earliest item even when it has no image", async () => {
+    const rows = [
+      {
+        id: "s1",
+        owner_id: "user-1",
+        name: "Alpha",
+        share_token: null,
+        created_at: "2026-07-01T00:00:00.000Z",
+        updated_at: "2026-07-02T00:00:00.000Z",
+        stash_items: [{ count: 2 }],
+      },
+    ];
+
+    const listClient = createMockClient({
+      from: (table: string) => {
+        if (table === "stash_items") {
+          const builder: Record<string, unknown> = {};
+          const self = () => builder;
+          builder.select = self;
+          builder.in = self;
+          builder.order = async () => ({
+            data: [
+              {
+                stash_id: "s1",
+                image_path: null,
+                updated_at: "2026-07-01T12:00:00.000Z",
+                created_at: "2026-07-01T10:00:00.000Z",
+              },
+              {
+                stash_id: "s1",
+                image_path: "user-1/s1/item-late.jpg",
+                updated_at: "2026-07-02T12:00:00.000Z",
+                created_at: "2026-07-02T10:00:00.000Z",
+              },
+            ],
+            error: null,
+          });
+          return builder;
+        }
+
+        const builder: Record<string, unknown> = {};
+        const self = () => builder;
+        builder.select = self;
+        builder.eq = self;
+        builder.order = async () => ({ data: rows, error: null });
+        return builder;
+      },
+    });
+
+    const stashes = await listOwnedStashes(listClient);
+    expect(stashes[0]?.previewImageUrl).toBeUndefined();
   });
 
   it("throws StashLimitError when the user is at capacity", async () => {

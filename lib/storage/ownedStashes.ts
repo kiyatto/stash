@@ -1,7 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { MAX_STASHES_PER_USER } from "@/lib/supabase/constants";
-import { removeStashImageFolder } from "@/lib/storage/stashImages";
+import {
+  getStashImagePublicUrl,
+  removeStashImageFolder,
+} from "@/lib/storage/stashImages";
 
 type Client = SupabaseClient<Database>;
 
@@ -31,6 +34,8 @@ export type StashSummary = {
   createdAt: string;
   updatedAt: string;
   itemCount: number;
+  /** Public URL for the earliest-created item's image, when present. */
+  previewImageUrl?: string;
 };
 
 type StashRowWithCount = Database["public"]["Tables"]["stashes"]["Row"] & {
@@ -46,6 +51,56 @@ function mapSummary(row: StashRowWithCount): StashSummary {
     updatedAt: row.updated_at,
     itemCount: countEntry?.count ?? 0,
   };
+}
+
+/**
+ * Attaches each stash's earliest-created item image (by `created_at`) when that
+ * item has an `image_path`. Later items are ignored even if they have images.
+ */
+async function attachEarliestItemPreviews(
+  client: Client,
+  summaries: StashSummary[]
+): Promise<StashSummary[]> {
+  if (summaries.length === 0) return summaries;
+
+  const { data, error } = await client
+    .from("stash_items")
+    .select("stash_id, image_path, updated_at, created_at")
+    .in(
+      "stash_id",
+      summaries.map((stash) => stash.id)
+    )
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw new Error(`Failed to load stash previews: ${error.message}`);
+  }
+
+  const earliestByStash = new Map<
+    string,
+    { image_path: string | null; updated_at: string }
+  >();
+  for (const row of data ?? []) {
+    if (earliestByStash.has(row.stash_id)) continue;
+    earliestByStash.set(row.stash_id, {
+      image_path: row.image_path,
+      updated_at: row.updated_at,
+    });
+  }
+
+  return summaries.map((stash) => {
+    const earliest = earliestByStash.get(stash.id);
+    const path = earliest?.image_path;
+    if (!path) return stash;
+    return {
+      ...stash,
+      previewImageUrl: getStashImagePublicUrl(
+        client,
+        path,
+        earliest.updated_at
+      ),
+    };
+  });
 }
 
 function isLimitError(message: string): boolean {
@@ -81,7 +136,7 @@ export async function listOwnedStashes(
     throw new Error(`Failed to list stashes: ${error.message}`);
   }
 
-  return (data ?? []).map(mapSummary);
+  return attachEarliestItemPreviews(client, (data ?? []).map(mapSummary));
 }
 
 /** Creates a new stash. Does not auto-create on login — callers must opt in. */
@@ -146,7 +201,10 @@ export async function renameOwnedStash(
     throw new StashNotFoundError(stashId);
   }
 
-  return mapSummary(data);
+  const [summary] = await attachEarliestItemPreviews(client, [
+    mapSummary(data),
+  ]);
+  return summary!;
 }
 
 export async function deleteOwnedStash(
@@ -199,5 +257,8 @@ export async function getOwnedStashRow(
     throw new StashNotFoundError(stashId);
   }
 
-  return mapSummary(data);
+  const [summary] = await attachEarliestItemPreviews(client, [
+    mapSummary(data),
+  ]);
+  return summary!;
 }

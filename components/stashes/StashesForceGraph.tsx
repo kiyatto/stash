@@ -47,6 +47,11 @@ function stashLabelHitWidth(node: GraphNode): number {
   return Math.max(STASH_NODE_SIZE + LABEL_HIT_PAD_X * 2, label.length * 9 + 16);
 }
 
+/** The profile is pinned at y=0, so an upper stash has its edge below it. */
+function stashLabelIsAbove(node: GraphNode): boolean {
+  return node.kind === "stash" && (node.y ?? 0) < 0;
+}
+
 export type GraphProfile = {
   displayName: string;
   avatarUrl?: string;
@@ -58,6 +63,7 @@ type GraphNode = {
   kind: "profile" | "stash";
   label: string;
   itemCount?: number;
+  previewImageUrl?: string;
   avatarUrl?: string;
   avatarSeed?: string;
   /** Preferred rest position (soft spring target), like Graph.jsx x0/y0. */
@@ -201,6 +207,24 @@ function drawCoverImage(
   ctx.drawImage(img, x - dw / 2, y - dh / 2, dw, dh);
 }
 
+function drawCoverImageInRect(
+  ctx: CanvasRenderingContext2D,
+  img: HTMLImageElement,
+  x: number,
+  y: number,
+  w: number,
+  h: number
+) {
+  const iw = img.naturalWidth || img.width;
+  const ih = img.naturalHeight || img.height;
+  if (iw <= 0 || ih <= 0) return;
+
+  const scale = Math.max(w / iw, h / ih);
+  const dw = iw * scale;
+  const dh = ih * scale;
+  ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+}
+
 export function StashesForceGraph({
   userId,
   profile,
@@ -215,6 +239,7 @@ export function StashesForceGraph({
   const fgRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const avatarImageRef = useRef<HTMLImageElement | null>(null);
+  const previewImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const [avatarReady, setAvatarReady] = useState(false);
   const [layout, setLayout] = useState<GraphLayoutState>(() =>
     loadGraphLayout(userId)
@@ -223,6 +248,13 @@ export function StashesForceGraph({
   const layoutRadius = layoutRadiusForViewport(width, height);
   const linkDistance = layoutRadius;
   const stashIds = useMemo(() => stashes.map((stash) => stash.id), [stashes]);
+  const previewUrlsKey = useMemo(
+    () =>
+      stashes
+        .map((stash) => `${stash.id}:${stash.previewImageUrl ?? ""}`)
+        .join("|"),
+    [stashes]
+  );
   const effectiveLayout = useMemo(
     () => normalizeGraphLayout(syncGraphLayoutOrder(layout, stashIds)),
     [layout, stashIds]
@@ -259,6 +291,45 @@ export function StashesForceGraph({
     };
   }, [profile.avatarUrl]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const next = new Map<string, HTMLImageElement>();
+    const wanted = stashes.filter((stash) => stash.previewImageUrl);
+
+    if (wanted.length === 0) {
+      previewImagesRef.current = next;
+      return;
+    }
+
+    let remaining = wanted.length;
+    const commit = () => {
+      if (cancelled || remaining > 0) return;
+      previewImagesRef.current = next;
+    };
+
+    for (const stash of wanted) {
+      const url = stash.previewImageUrl!;
+      const img = new window.Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        if (cancelled) return;
+        next.set(stash.id, img);
+        remaining -= 1;
+        commit();
+      };
+      img.onerror = () => {
+        if (cancelled) return;
+        remaining -= 1;
+        commit();
+      };
+      img.src = url;
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [previewUrlsKey, stashes]);
+
   const graphData = useMemo(() => {
     const homes = resolveStashHomes(effectiveLayout, stashIds, layoutRadius);
     const nodes: GraphNode[] = [
@@ -285,6 +356,7 @@ export function StashesForceGraph({
           kind: "stash" as const,
           label: stash.name,
           itemCount: stash.itemCount,
+          previewImageUrl: stash.previewImageUrl,
           x0: home.x0,
           y0: home.y0,
           x: home.x0,
@@ -449,28 +521,37 @@ export function StashesForceGraph({
         ctx.fillStyle = "rgba(255, 252, 247, 0.95)";
         ctx.fill();
 
-        const inset = 8;
-        roundRect(
-          ctx,
-          x - half + inset,
-          y - half + inset,
-          size - inset * 2,
-          size * 0.48,
-          10
-        );
-        ctx.fillStyle = "rgba(180, 160, 130, 0.22)";
-        ctx.fill();
+        const preview = previewImagesRef.current.get(node.id);
+        if (preview) {
+          ctx.save();
+          roundRect(ctx, x - half, y - half, size, size, STASH_NODE_RADIUS);
+          ctx.clip();
+          drawCoverImageInRect(ctx, preview, x - half, y - half, size, size);
+          ctx.restore();
+        } else {
+          const inset = 8;
+          roundRect(
+            ctx,
+            x - half + inset,
+            y - half + inset,
+            size - inset * 2,
+            size * 0.48,
+            10
+          );
+          ctx.fillStyle = "rgba(180, 160, 130, 0.22)";
+          ctx.fill();
 
-        ctx.fillStyle = "rgba(80, 60, 40, 0.45)";
-        ctx.font = `${Math.max(8 / globalScale, 2.6)}px ui-monospace, monospace`;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        const count = node.itemCount ?? 0;
-        ctx.fillText(
-          count === 1 ? "1 item" : `${count} items`,
-          x,
-          y - half + inset + (size * 0.48) / 2
-        );
+          ctx.fillStyle = "rgba(80, 60, 40, 0.45)";
+          ctx.font = `${Math.max(8 / globalScale, 2.6)}px ui-monospace, monospace`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          const count = node.itemCount ?? 0;
+          ctx.fillText(
+            count === 1 ? "1 item" : `${count} items`,
+            x,
+            y - half + inset + (size * 0.48) / 2
+          );
+        }
 
         ctx.lineWidth = 1.25 / globalScale;
         ctx.strokeStyle = "rgba(80, 60, 40, 0.22)";
@@ -481,9 +562,14 @@ export function StashesForceGraph({
       ctx.fillStyle = "rgba(70, 50, 35, 0.9)";
       ctx.font = `italic ${labelFont * 1.25}px Georgia, "Times New Roman", serif`;
       ctx.textAlign = "center";
-      ctx.textBaseline = "top";
       const label = node.label || (isProfile ? "You" : "Untitled");
-      ctx.fillText(label, x, y + half + 5 / globalScale);
+      if (stashLabelIsAbove(node)) {
+        ctx.textBaseline = "bottom";
+        ctx.fillText(label, x, y - half - 5 / globalScale);
+      } else {
+        ctx.textBaseline = "top";
+        ctx.fillText(label, x, y + half + 5 / globalScale);
+      }
 
       ctx.restore();
     },
@@ -499,12 +585,13 @@ export function StashesForceGraph({
       if (node.kind === "profile") {
         circlePath(ctx, x, y, half);
       } else {
-        // Include the title label under the card so label clicks register.
+        // Include the title on whichever side is away from the connected edge.
         const hitWidth = stashLabelHitWidth(node);
+        const labelAbove = stashLabelIsAbove(node);
         roundRect(
           ctx,
           x - hitWidth / 2,
-          y - half,
+          y - half - (labelAbove ? LABEL_HIT_HEIGHT : 0),
           hitWidth,
           size + LABEL_HIT_HEIGHT,
           STASH_NODE_RADIUS
@@ -528,8 +615,13 @@ export function StashesForceGraph({
     const x = node.x ?? 0;
     const y = node.y ?? 0;
     const half = STASH_NODE_SIZE / 2;
-    const labelTop = y + half;
-    const labelBottom = y + half + LABEL_HIT_HEIGHT;
+    const labelAbove = stashLabelIsAbove(node);
+    const labelTop = labelAbove
+      ? y - half - LABEL_HIT_HEIGHT
+      : y + half;
+    const labelBottom = labelAbove
+      ? y - half
+      : y + half + LABEL_HIT_HEIGHT;
     const labelHalfWidth = stashLabelHitWidth(node) / 2;
     return (
       gy >= labelTop &&

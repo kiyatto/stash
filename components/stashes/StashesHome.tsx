@@ -276,7 +276,17 @@ export function StashesHome() {
               name
             );
             setStashes((prev) =>
-              prev.map((s) => (s.id === updated.id ? updated : s))
+              prev.map((s) =>
+                s.id === updated.id
+                  ? {
+                      ...s,
+                      ...updated,
+                      // Rename response does not re-fetch the preview image.
+                      previewImageUrl:
+                        updated.previewImageUrl ?? s.previewImageUrl,
+                    }
+                  : s
+              )
             );
             setEditingStash(null);
           } catch (err) {
