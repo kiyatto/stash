@@ -121,13 +121,24 @@ export function StashesHome() {
     const el = containerRef.current;
     if (!el) return;
 
-    const update = () => {
-      const rect = el.getBoundingClientRect();
-      setSize({ width: Math.floor(rect.width), height: Math.floor(rect.height) });
+    const update = (entry?: ResizeObserverEntry) => {
+      const width = entry
+        ? entry.contentRect.width
+        : el.clientWidth;
+      const height = entry
+        ? entry.contentRect.height
+        : el.clientHeight;
+      setSize({
+        width: Math.max(0, Math.floor(width)),
+        height: Math.max(0, Math.floor(height)),
+      });
     };
     update();
 
-    const observer = new ResizeObserver(update);
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) update(entry);
+    });
     observer.observe(el);
     return () => observer.disconnect();
   }, [loading]);
@@ -206,7 +217,10 @@ export function StashesHome() {
         </div>
       </div>
 
-      <div ref={containerRef} className="relative min-h-0 flex-1">
+      <div
+        ref={containerRef}
+        className="relative min-h-0 flex-1 p-6 md:p-8"
+      >
         {stashes.length === 0 ? (
           <div className="pointer-events-none absolute inset-0 z-[1] flex items-center justify-center">
             <p className="mt-24 font-mono text-xs uppercase tracking-widest text-muted-foreground">

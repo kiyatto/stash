@@ -65,6 +65,16 @@ function drawCoverImage(
   ctx.drawImage(img, x, y, dw, dh);
 }
 
+function strokeHairline(
+  ctx: CanvasRenderingContext2D,
+  globalScale: number,
+  color: string
+) {
+  ctx.lineWidth = 1 / Math.max(globalScale, 0.5);
+  ctx.strokeStyle = color;
+  ctx.stroke();
+}
+
 export function paintGraphNode(
   node: GraphNode,
   ctx: CanvasRenderingContext2D,
@@ -81,16 +91,15 @@ export function paintGraphNode(
   const isProfile = node.kind === "profile";
   const size = isProfile ? PROFILE_NODE_SIZE : STASH_NODE_SIZE;
   const half = size / 2;
-  const labelFont = Math.max(10 / globalScale, 3.2);
+  const labelFont = Math.max(11 / globalScale, 3.4);
+  const labelGap = 8 / globalScale;
 
   ctx.save();
 
   if (isProfile) {
     const seed = node.avatarSeed ?? "default";
 
-    ctx.beginPath();
-    ctx.arc(x, y, half, 0, Math.PI * 2);
-    ctx.closePath();
+    circlePath(ctx, x, y, half);
     ctx.fillStyle = seedToColor(seed);
     ctx.fill();
 
@@ -102,58 +111,36 @@ export function paintGraphNode(
       ctx.restore();
     }
 
-    ctx.beginPath();
-    ctx.arc(x, y, half, 0, Math.PI * 2);
-    ctx.closePath();
-    ctx.lineWidth = 1.5 / globalScale;
-    ctx.strokeStyle = "rgba(80, 60, 40, 0.35)";
-    ctx.stroke();
+    circlePath(ctx, x, y, half);
+    strokeHairline(ctx, globalScale, "rgba(70, 52, 36, 0.14)");
   } else {
-    roundRect(ctx, x - half, y - half, size, size, STASH_NODE_RADIUS);
-    ctx.fillStyle = "rgba(255, 252, 247, 0.95)";
+    circlePath(ctx, x, y, half);
+    ctx.fillStyle = "rgba(255, 253, 249, 0.92)";
     ctx.fill();
 
     const preview = options.previewImages.get(node.id);
     if (preview) {
       ctx.save();
-      roundRect(ctx, x - half, y - half, size, size, STASH_NODE_RADIUS);
+      circlePath(ctx, x, y, half);
       ctx.clip();
-      drawCoverImage(ctx, preview, x - half, y - half, size, size, false);
+      drawCoverImage(ctx, preview, x, y, size, size, true);
       ctx.restore();
     } else {
-      const inset = 8;
-      roundRect(
-        ctx,
-        x - half + inset,
-        y - half + inset,
-        size - inset * 2,
-        size * 0.48,
-        10
-      );
-      ctx.fillStyle = "rgba(180, 160, 130, 0.22)";
-      ctx.fill();
-
-      ctx.fillStyle = "rgba(80, 60, 40, 0.45)";
-      ctx.font = `${Math.max(8 / globalScale, 2.6)}px ui-monospace, monospace`;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
       const count =
         options.stashMeta[node.id]?.itemCount ?? node.itemCount ?? 0;
-      ctx.fillText(
-        count === 1 ? "1 item" : `${count} items`,
-        x,
-        y - half + inset + (size * 0.48) / 2
-      );
+      ctx.fillStyle = "rgba(70, 52, 36, 0.38)";
+      ctx.font = `500 ${Math.max(10 / globalScale, 3)}px ui-sans-serif, system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(String(count), x, y + 0.5 / globalScale);
     }
 
-    ctx.lineWidth = 1.25 / globalScale;
-    ctx.strokeStyle = "rgba(80, 60, 40, 0.22)";
-    roundRect(ctx, x - half, y - half, size, size, STASH_NODE_RADIUS);
-    ctx.stroke();
+    circlePath(ctx, x, y, half);
+    strokeHairline(ctx, globalScale, "rgba(70, 52, 36, 0.12)");
   }
 
-  ctx.fillStyle = "rgba(70, 50, 35, 0.9)";
-  ctx.font = `italic ${labelFont * 1.25}px Georgia, "Times New Roman", serif`;
+  ctx.fillStyle = "rgba(55, 42, 30, 0.72)";
+  ctx.font = `500 ${labelFont}px ui-sans-serif, system-ui, sans-serif`;
   ctx.textAlign = "center";
   const label =
     (isProfile
@@ -162,10 +149,10 @@ export function paintGraphNode(
     (isProfile ? "You" : "Untitled");
   if (stashLabelIsAbove(node)) {
     ctx.textBaseline = "bottom";
-    ctx.fillText(label, x, y - half - 5 / globalScale);
+    ctx.fillText(label, x, y - half - labelGap);
   } else {
     ctx.textBaseline = "top";
-    ctx.fillText(label, x, y + half + 5 / globalScale);
+    ctx.fillText(label, x, y + half + labelGap);
   }
 
   ctx.restore();

@@ -4,19 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { StashSummary } from "@/lib/storage/ownedStashes";
 import {
-  cartesianToPolar,
-  loadGraphLayout,
-  normalizeGraphLayout,
-  polarToCartesian,
   resolveStashHomes,
-  saveGraphLayout,
   syncGraphLayoutOrder,
-  type GraphLayoutState,
 } from "@/lib/storage/graphLayout";
-import {
-  createCollisionForce,
-  createHomeForce,
-} from "@/components/stashes/forceGraphForces";
+import { createHomeForce, createHubTetherForce, resetProfileHome } from "@/components/stashes/forceGraphForces";
 import {
   paintGraphNode,
   paintGraphPointerArea,
@@ -25,14 +16,19 @@ import {
 import {
   CHARGE_STRENGTH,
   DEFAULT_GRAPH_ZOOM,
+  DRAG_SETTLE_ALPHA,
+  DRAG_SETTLE_MS,
+  HUB_TETHER_STRENGTH,
   LABEL_HIT_HEIGHT,
-  LINK_STRENGTH,
   PROFILE_ID,
   STASH_NODE_SIZE,
   VELOCITY_DECAY,
+  clampNodeToBounds,
   layoutRadiusForViewport,
+  linkDistanceForViewport,
   stashLabelHitWidth,
   stashLabelIsAbove,
+  viewportBounds,
   type ForceGraphHandle,
   type GraphLink,
   type GraphNode,
@@ -57,7 +53,7 @@ type StashesForceGraphProps = {
 };
 
 export function StashesForceGraph({
-  userId,
+  userId: _userId,
   profile,
   stashes,
   width,
@@ -71,13 +67,11 @@ export function StashesForceGraph({
   const avatarImageRef = useRef<HTMLImageElement | null>(null);
   const previewImagesRef = useRef<Map<string, HTMLImageElement>>(new Map());
   const stashMetaRef = useRef<Record<string, StashMeta>>({});
+  const settleTimerRef = useRef(0);
   const [avatarReady, setAvatarReady] = useState(false);
-  const [layout, setLayout] = useState<GraphLayoutState>(() =>
-    loadGraphLayout(userId)
-  );
 
   const layoutRadius = layoutRadiusForViewport(width, height);
-  const linkDistance = layoutRadius;
+  const linkDistance = linkDistanceForViewport(width, height);
   const stashIds = useMemo(() => stashes.map((stash) => stash.id), [stashes]);
   const stashIdsKey = stashIds.join("\0");
   const previewUrlsKey = useMemo(
@@ -87,18 +81,8 @@ export function StashesForceGraph({
         .join("|"),
     [stashes]
   );
-  const effectiveLayout = useMemo(
-    () => normalizeGraphLayout(syncGraphLayoutOrder(layout, stashIds)),
-    [layout, stashIds]
-  );
-  // Rebuild graph nodes only when membership/order changes — not when a drag
-  // saves polar homes or when names/previews update.
-  const layoutOrderKey = effectiveLayout.order.join("\0");
-  const graphStructureKey = `${stashIdsKey}::${layoutOrderKey}::${layoutRadius}`;
-
-  useEffect(() => {
-    saveGraphLayout(userId, effectiveLayout);
-  }, [userId, effectiveLayout]);
+  // Default clockwise homes only — drag updates x0/y0 in-session on the live nodes.
+  const graphStructureKey = `${stashIdsKey}::${layoutRadius}`;
 
   useEffect(() => {
     stashMetaRef.current = Object.fromEntries(
@@ -176,8 +160,18 @@ export function StashesForceGraph({
     };
   }, [previewUrlsKey, stashes]);
 
+  useEffect(() => {
+    return () => {
+      window.clearTimeout(settleTimerRef.current);
+    };
+  }, []);
+
   const graphData = useMemo(() => {
-    const homes = resolveStashHomes(effectiveLayout, stashIds, layoutRadius);
+    const layout = syncGraphLayoutOrder(
+      { version: 1, order: [], positions: {} },
+      stashIds
+    );
+    const homes = resolveStashHomes(layout, stashIds, layoutRadius);
     const nodes: GraphNode[] = [
       {
         id: PROFILE_ID,
@@ -189,8 +183,6 @@ export function StashesForceGraph({
         y0: 0,
         x: 0,
         y: 0,
-        fx: 0,
-        fy: 0,
       },
       ...stashes.map((stash) => {
         const home = homes[stash.id] ?? {
@@ -216,7 +208,7 @@ export function StashesForceGraph({
     }));
     return { nodes, links };
     // Labels/previews are read from stashMetaRef during paint so rename/preview
-    // updates do not replace live simulation nodes (which kills bounce).
+    // updates do not replace live simulation nodes.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- see graphStructureKey
   }, [
     profile.displayName,
@@ -236,19 +228,35 @@ export function StashesForceGraph({
     const fg = fgRef.current;
     if (!fg?.d3Force || width <= 0 || height <= 0) return false;
 
+    // Gentle springs: default link force is visual-only; hub tether pulls
+    // stashes only so the profile can soft-recenter at the origin.
     fg.d3Force("center", null);
+    fg.d3Force("collide", null);
     fg.d3Force("x", createHomeForce("x"));
     fg.d3Force("y", createHomeForce("y"));
-    fg.d3Force("collide", createCollisionForce());
+    fg.d3Force(
+      "hubTether",
+      createHubTetherForce(linkDistance, HUB_TETHER_STRENGTH)
+    );
 
-    const charge = fg.d3Force("charge");
-    if (charge?.strength) charge.strength(CHARGE_STRENGTH);
+    const charge = fg.d3Force("charge") as
+      | {
+          strength?: (
+            value: number | ((node: GraphNode, i: number, nodes: GraphNode[]) => number)
+          ) => unknown;
+        }
+      | undefined
+      | null;
+    if (charge?.strength) {
+      // Profile ignores charge so nothing but its home spring offsets it.
+      charge.strength((node) =>
+        node.kind === "profile" ? 0 : CHARGE_STRENGTH
+      );
+    }
 
     const link = fg.d3Force("link");
-    if (link?.distance) link.distance(linkDistance);
-    if (link?.strength) link.strength(LINK_STRENGTH);
+    if (link?.strength) link.strength(0);
 
-    // Prefer the React prop for decay; call the imperative API only when present.
     fg.d3VelocityDecay?.(VELOCITY_DECAY);
     centerCamera();
     fg.d3ReheatSimulation?.();
@@ -263,7 +271,6 @@ export function StashesForceGraph({
     let raf = 0;
     let timer = 0;
 
-    // Dynamic import means fgRef is often null on the first effect pass.
     const tryApply = () => {
       if (cancelled) return;
       if (applyForces()) {
@@ -368,6 +375,36 @@ export function StashesForceGraph({
     );
   }
 
+  function getBounds() {
+    const fg = fgRef.current;
+    const k =
+      typeof fg?.zoom === "function" ? Number(fg.zoom()) || DEFAULT_GRAPH_ZOOM : DEFAULT_GRAPH_ZOOM;
+    const center =
+      typeof fg?.centerAt === "function" ? fg.centerAt() : { x: 0, y: 0 };
+    return viewportBounds(width, height, k, {
+      x: center?.x ?? 0,
+      y: center?.y ?? 0,
+    });
+  }
+
+  function clampAllNodes() {
+    const bounds = getBounds();
+    for (const node of graphData.nodes) {
+      clampNodeToBounds(node, bounds);
+    }
+  }
+
+  function settleAfterDrag() {
+    const fg = fgRef.current;
+    // Graph.jsx: alphaTarget(0.1).restart(); then alphaTarget(0) after 500ms.
+    fg?.d3AlphaTarget?.(DRAG_SETTLE_ALPHA);
+    fg?.d3ReheatSimulation?.();
+    window.clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = window.setTimeout(() => {
+      fgRef.current?.d3AlphaTarget?.(0);
+    }, DRAG_SETTLE_MS);
+  }
+
   if (width <= 0 || height <= 0) {
     return null;
   }
@@ -386,49 +423,34 @@ export function StashesForceGraph({
         nodeCanvasObject={paintNode as never}
         nodeCanvasObjectMode={() => "replace"}
         nodePointerAreaPaint={paintPointerArea as never}
-        linkColor={() => "rgba(105, 82, 60, 0.42)"}
-        linkWidth={1.5}
+        linkColor={() => "rgba(70, 52, 36, 0.2)"}
+        linkWidth={1.25}
         d3VelocityDecay={VELOCITY_DECAY}
         cooldownTicks={Infinity}
+        enableNodeDrag
         enableZoomInteraction={false}
         enablePanInteraction
+        onEngineTick={clampAllNodes}
+        onNodeDrag={(node) => {
+          clampNodeToBounds(node as GraphNode, getBounds());
+        }}
         onNodeDragEnd={(node) => {
           const n = node as GraphNode;
-          const fg = fgRef.current;
-          if (n.kind === "profile") {
-            n.x0 = 0;
-            n.y0 = 0;
-            n.x = 0;
-            n.y = 0;
-            n.fx = 0;
-            n.fy = 0;
-            fg?.d3ReheatSimulation?.();
-            return;
+          clampNodeToBounds(n, getBounds());
+
+          const profile = graphData.nodes.find(
+            (candidate) => candidate.id === PROFILE_ID
+          );
+          // Profile always springs back to the box center.
+          resetProfileHome(profile);
+
+          if (n.kind === "stash") {
+            // Session-only rest position — not persisted across reloads.
+            n.x0 = n.x ?? n.x0;
+            n.y0 = n.y ?? n.y0;
           }
 
-          const x = n.x ?? n.x0;
-          const y = n.y ?? n.y0;
-          const polar = cartesianToPolar(x, y, layoutRadius);
-          const home = polarToCartesian(
-            polar.angle,
-            layoutRadius * polar.radiusRatio
-          );
-          n.x0 = home.x0;
-          n.y0 = home.y0;
-
-          setLayout((prev) => {
-            const synced = syncGraphLayoutOrder(prev, stashIds);
-            const next: GraphLayoutState = {
-              ...synced,
-              positions: {
-                ...synced.positions,
-                [n.id]: polar,
-              },
-            };
-            saveGraphLayout(userId, next);
-            return next;
-          });
-          fg?.d3ReheatSimulation?.();
+          settleAfterDrag();
         }}
         onNodeClick={(node, event) => {
           const n = node as GraphNode;
