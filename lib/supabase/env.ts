@@ -1,7 +1,6 @@
 const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const SUPABASE_PUBLISHABLE_KEY =
   process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-const SUPABASE_SECRET_KEY = process.env.SUPABASE_SECRET_KEY;
 
 export function isSupabaseConfigured(): boolean {
   return Boolean(SUPABASE_URL && SUPABASE_PUBLISHABLE_KEY);
@@ -23,14 +22,4 @@ export function getSupabasePublishableKey(): string {
     );
   }
   return SUPABASE_PUBLISHABLE_KEY;
-}
-
-/** Server-only. Used for cron/admin tasks in later phases. Never expose to the browser. */
-export function getSupabaseSecretKey(): string {
-  if (!SUPABASE_SECRET_KEY) {
-    throw new Error(
-      "Missing SUPABASE_SECRET_KEY. Required for server-side admin operations only."
-    );
-  }
-  return SUPABASE_SECRET_KEY;
 }

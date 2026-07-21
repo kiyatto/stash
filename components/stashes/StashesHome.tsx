@@ -52,14 +52,25 @@ export function StashesHome() {
   const [importOpen, setImportOpen] = useState(false);
   const [importItemCount, setImportItemCount] = useState(0);
 
-  const refresh = useCallback(async () => {
-    const [nextProfile, nextStashes] = await Promise.all([
-      getOwnProfile(client),
-      listOwnedStashes(client),
-    ]);
-    setProfile(nextProfile);
-    setStashes(nextStashes);
-  }, [client]);
+  const refresh = useCallback(
+    async (options?: { showLoading?: boolean }) => {
+      if (options?.showLoading) setLoading(true);
+      try {
+        const [nextProfile, nextStashes] = await Promise.all([
+          getOwnProfile(client),
+          listOwnedStashes(client),
+        ]);
+        setProfile(nextProfile);
+        setStashes(nextStashes);
+        setError(null);
+      } catch (err) {
+        setError(getStorageErrorMessage(err));
+      } finally {
+        if (options?.showLoading) setLoading(false);
+      }
+    },
+    [client]
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -76,9 +87,7 @@ export function StashesHome() {
         setError(null);
       } catch (err) {
         if (cancelled) return;
-        setError(
-          err instanceof Error ? err.message : "Failed to load your stashes."
-        );
+        setError(getStorageErrorMessage(err));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -162,17 +171,7 @@ export function StashesHome() {
           variant="outline"
           className="font-mono text-xs uppercase tracking-wide"
           onClick={() => {
-            setLoading(true);
-            refresh()
-              .then(() => setError(null))
-              .catch((err) =>
-                setError(
-                  err instanceof Error
-                    ? err.message
-                    : "Failed to load your stashes."
-                )
-              )
-              .finally(() => setLoading(false));
+            void refresh({ showLoading: true });
           }}
         >
           Try again
@@ -183,9 +182,7 @@ export function StashesHome() {
 
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-3 px-4 py-3">
-        <div className="pointer-events-none">
-        </div>
+      <div className="pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-end gap-3 px-4 py-3">
         <div className="pointer-events-auto flex flex-col items-end gap-2">
           <Button
             type="button"
@@ -218,7 +215,7 @@ export function StashesHome() {
           </div>
         ) : null}
         <StashesForceGraph
-          key={`${profile.id}-${graphProfile.avatarUrl ?? graphProfile.avatarSeed}`}
+          key={profile.id}
           userId={profile.id}
           profile={graphProfile}
           stashes={stashes}

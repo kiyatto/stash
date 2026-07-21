@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, PackageOpen } from "lucide-react";
 import {
@@ -35,6 +35,7 @@ export function ImportAnonStashDialog({
   onImported,
 }: ImportAnonStashDialogProps) {
   const router = useRouter();
+  const client = useMemo(() => createClient(), []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -42,7 +43,6 @@ export function ImportAnonStashDialog({
     setBusy(true);
     setError(null);
     try {
-      const client = createClient();
       const result = await importAnonStash(client);
       onOpenChange(false);
       onImported?.(result.stashId);

@@ -4,11 +4,12 @@ import {
   STORAGE_BUCKETS,
   stashImageObjectPath,
 } from "@/lib/supabase/constants";
+import { mimeToExt } from "@/lib/image";
 import { MAX_IMAGE_BYTES } from "@/lib/types";
 
 type Client = SupabaseClient<Database>;
 
-export function isDataUrl(value: string | undefined | null): boolean {
+export function isDataUrl(value: string | undefined | null): value is string {
   return typeof value === "string" && value.startsWith("data:");
 }
 
@@ -20,14 +21,7 @@ export function dataUrlToBlob(dataUrl: string): { blob: Blob; ext: string } {
 
   const mimeMatch = /data:(.*?);/.exec(header);
   const mime = mimeMatch?.[1] ?? "image/jpeg";
-  const ext =
-    mime === "image/png"
-      ? "png"
-      : mime === "image/webp"
-        ? "webp"
-        : mime === "image/gif"
-          ? "gif"
-          : "jpg";
+  const ext = mimeToExt(mime);
 
   const binary = atob(base64);
   const bytes = new Uint8Array(binary.length);

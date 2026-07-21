@@ -1,3 +1,5 @@
+import { getLocalStorage } from "@/lib/browser/localStorage";
+
 const STORAGE_PREFIX = "stash:graph-layout:";
 
 /** First stash sits slightly east of 12 o'clock so 2-node layouts aren't a vertical line. */
@@ -30,15 +32,6 @@ function emptyLayout(): GraphLayoutState {
 
 function storageKey(userId: string): string {
   return `${STORAGE_PREFIX}${userId}`;
-}
-
-function getLocalStorage(): Storage | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
 }
 
 function clampRadiusRatio(ratio: number): number {

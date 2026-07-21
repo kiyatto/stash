@@ -4,22 +4,13 @@ import {
   STORAGE_BUCKETS,
   avatarObjectPath,
 } from "@/lib/supabase/constants";
+import { mimeToExt } from "@/lib/image";
+import { requireUserId } from "@/lib/supabase/requireUserId";
 import { MAX_IMAGE_BYTES } from "@/lib/types";
 
 type Client = SupabaseClient<Database>;
 
-async function requireUserId(client: Client): Promise<string> {
-  const {
-    data: { user },
-    error,
-  } = await client.auth.getUser();
-
-  if (error || !user) {
-    throw new Error("You must be signed in to manage your profile.");
-  }
-
-  return user.id;
-}
+const AUTH_MESSAGE = "You must be signed in to manage your profile.";
 
 export function getAvatarPublicUrl(
   client: Client,
@@ -35,7 +26,7 @@ export function getAvatarPublicUrl(
 }
 
 export async function getOwnProfile(client: Client): Promise<Profile> {
-  const userId = await requireUserId(client);
+  const userId = await requireUserId(client, AUTH_MESSAGE);
 
   const { data, error } = await client
     .from("profiles")
@@ -72,7 +63,7 @@ export async function updateDisplayName(
   client: Client,
   displayName: string
 ): Promise<Profile> {
-  const userId = await requireUserId(client);
+  const userId = await requireUserId(client, AUTH_MESSAGE);
   const trimmed = displayName.trim();
 
   const { data, error } = await client
@@ -93,22 +84,13 @@ export async function uploadAvatar(
   client: Client,
   file: File
 ): Promise<Profile> {
-  const userId = await requireUserId(client);
+  const userId = await requireUserId(client, AUTH_MESSAGE);
 
   if (file.size > MAX_IMAGE_BYTES) {
     throw new Error(`Image exceeds ${MAX_IMAGE_BYTES} byte limit`);
   }
 
-  const ext =
-    file.type === "image/png"
-      ? "png"
-      : file.type === "image/webp"
-        ? "webp"
-        : file.type === "image/gif"
-          ? "gif"
-          : "jpg";
-
-  const path = avatarObjectPath(userId, `avatar.${ext}`);
+  const path = avatarObjectPath(userId, `avatar.${mimeToExt(file.type)}`);
 
   const { error: uploadError } = await client.storage
     .from(STORAGE_BUCKETS.avatars)
@@ -137,7 +119,7 @@ export async function uploadAvatar(
 }
 
 export async function removeAvatar(client: Client): Promise<Profile> {
-  const userId = await requireUserId(client);
+  const userId = await requireUserId(client, AUTH_MESSAGE);
   const profile = await getOwnProfile(client);
 
   if (profile.avatar_url && !profile.avatar_url.startsWith("http")) {

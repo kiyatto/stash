@@ -210,6 +210,8 @@ function StashCanvasInner({
       .finally(() => {
         setLoading(false);
       });
+    // applyStash closes over current resize handlers; remount via key handles repo changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -413,21 +415,21 @@ function StashCanvasInner({
         zoomOnPinch
         proOptions={{ hideAttribution: true }}
       >
-        {bgVariant === "dots" ? (
-          <Background
-            variant={BackgroundVariant.Dots}
-            gap={28}
-            size={1.4}
-            color="var(--bg-dot-color)"
-          />
-        ) : (
-          <Background
-            variant={BackgroundVariant.Lines}
-            gap={24}
-            lineWidth={1}
-            color="var(--bg-grid-color)"
-          />
-        )}
+        <Background
+          variant={
+            bgVariant === "dots"
+              ? BackgroundVariant.Dots
+              : BackgroundVariant.Lines
+          }
+          gap={bgVariant === "dots" ? 28 : 24}
+          size={bgVariant === "dots" ? 1.4 : undefined}
+          lineWidth={bgVariant === "lines" ? 1 : undefined}
+          color={
+            bgVariant === "dots"
+              ? "var(--bg-dot-color)"
+              : "var(--bg-grid-color)"
+          }
+        />
         <Panel position="top-left" className="p-0">
           <span className="font-mono text-[9px] uppercase tracking-widest text-muted-foreground/40">
             {statusLabel}

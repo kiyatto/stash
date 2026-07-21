@@ -2,10 +2,12 @@ import { v4 as uuidv4 } from "uuid";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
 import type { Database, StashItemRow, StashRow } from "@/lib/supabase/database.types";
+import { requireUserId } from "@/lib/supabase/requireUserId";
 import {
   StashItemsFullError,
   type StashRepository,
 } from "@/lib/storage/stashRepository";
+import { mapStashItemRow, mapStashRow } from "@/lib/storage/mapStashItem";
 import { StashNotFoundError } from "@/lib/storage/ownedStashes";
 import {
   getStashImagePublicUrl,
@@ -23,71 +25,46 @@ import { MAX_ITEMS_PER_STASH } from "@/lib/types";
 
 type Client = SupabaseClient<Database>;
 
-function mapItem(row: StashItemRow, client: Client): StashItem {
-  const imagePath = row.image_path ?? undefined;
-  return {
-    id: row.id,
-    name: row.name,
-    imagePath,
-    imageDataUrl: imagePath
-      ? getStashImagePublicUrl(client, imagePath, row.updated_at)
-      : undefined,
-    link: row.link ?? undefined,
-    notes: row.notes ?? undefined,
-    x: row.x,
-    y: row.y,
-    width: row.width,
-    height: row.height,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
-  };
-}
-
-function mapStash(
-  stashRow: StashRow,
-  itemRows: StashItemRow[],
-  client: Client
-): Stash {
-  return {
-    id: stashRow.id,
-    name: stashRow.name,
-    items: itemRows.map((row) => mapItem(row, client)),
-    createdAt: stashRow.created_at,
-    updatedAt: stashRow.updated_at,
-  };
-}
+const AUTH_MESSAGE = "You must be signed in to edit this stash.";
 
 function isItemLimitError(message: string): boolean {
   return /stash item limit reached/i.test(message);
 }
 
+function withTouchedStash(
+  stash: Stash,
+  stashRow: StashRow | undefined,
+  items: StashItem[]
+): Stash {
+  return {
+    ...stash,
+    items,
+    updatedAt: stashRow?.updated_at ?? new Date().toISOString(),
+  };
+}
+
 class SupabaseStashRepository implements StashRepository {
+  private cachedUserId: string | null = null;
+
   constructor(
     private readonly stashId: string,
     private readonly client: Client
   ) {}
 
-  private async requireUserId(): Promise<string> {
-    const {
-      data: { user },
-      error,
-    } = await this.client.auth.getUser();
-
-    if (error || !user) {
-      throw new Error("You must be signed in to edit this stash.");
-    }
-
-    return user.id;
+  private async getUserId(): Promise<string> {
+    if (this.cachedUserId) return this.cachedUserId;
+    this.cachedUserId = await requireUserId(this.client, AUTH_MESSAGE);
+    return this.cachedUserId;
   }
 
-  private async loadStashRow(): Promise<StashRow | undefined> {
-    const userId = await this.requireUserId();
+  private async loadStashRow(userId?: string): Promise<StashRow | undefined> {
+    const ownerId = userId ?? (await this.getUserId());
 
     const { data, error } = await this.client
       .from("stashes")
       .select("*")
       .eq("id", this.stashId)
-      .eq("owner_id", userId)
+      .eq("owner_id", ownerId)
       .maybeSingle();
 
     if (error) {
@@ -111,22 +88,28 @@ class SupabaseStashRepository implements StashRepository {
     return data ?? [];
   }
 
-  private async touchStashUpdatedAt(): Promise<void> {
-    const { error } = await this.client
+  private async touchStashUpdatedAt(): Promise<StashRow> {
+    const { data, error } = await this.client
       .from("stashes")
       .update({ updated_at: new Date().toISOString() })
-      .eq("id", this.stashId);
+      .eq("id", this.stashId)
+      .select("*")
+      .maybeSingle();
 
     if (error) {
       throw new Error(`Failed to update stash: ${error.message}`);
     }
+    if (!data) {
+      throw new StashNotFoundError(this.stashId);
+    }
+    return data;
   }
 
   async getStash(): Promise<Stash | undefined> {
     const stashRow = await this.loadStashRow();
     if (!stashRow) return undefined;
     const items = await this.loadItems();
-    return mapStash(stashRow, items, this.client);
+    return mapStashRow(stashRow, items, this.client);
   }
 
   /**
@@ -142,7 +125,7 @@ class SupabaseStashRepository implements StashRepository {
   }
 
   async saveStash(stash: Stash): Promise<Stash> {
-    const userId = await this.requireUserId();
+    const userId = await this.getUserId();
 
     const { data, error } = await this.client
       .from("stashes")
@@ -159,17 +142,16 @@ class SupabaseStashRepository implements StashRepository {
       throw new StashNotFoundError(this.stashId);
     }
 
-    const items = await this.loadItems();
-    return mapStash(data, items, this.client);
+    return {
+      ...stash,
+      name: data.name,
+      updatedAt: data.updated_at,
+    };
   }
 
   async touchStash(stash: Stash): Promise<Stash> {
-    await this.touchStashUpdatedAt();
-    const reloaded = await this.getStash();
-    if (!reloaded) {
-      throw new StashNotFoundError(this.stashId);
-    }
-    return { ...reloaded, name: stash.name };
+    const stashRow = await this.touchStashUpdatedAt();
+    return { ...stash, updatedAt: stashRow.updated_at };
   }
 
   async createItem(
@@ -180,7 +162,7 @@ class SupabaseStashRepository implements StashRepository {
       throw new StashItemsFullError(MAX_ITEMS_PER_STASH);
     }
 
-    const userId = await this.requireUserId();
+    const userId = await this.getUserId();
     const itemId = uuidv4();
 
     let imagePath: string | null = null;
@@ -190,7 +172,7 @@ class SupabaseStashRepository implements StashRepository {
         userId,
         this.stashId,
         itemId,
-        data.imageDataUrl!
+        data.imageDataUrl
       );
     }
 
@@ -221,15 +203,12 @@ class SupabaseStashRepository implements StashRepository {
       throw new Error(`Failed to create item: ${error.message}`);
     }
 
-    await this.touchStashUpdatedAt();
-
-    const item = mapItem(row, this.client);
-    const stashRow = await this.loadStashRow();
-    if (!stashRow) {
-      throw new StashNotFoundError(this.stashId);
-    }
-    const items = await this.loadItems();
-    return { stash: mapStash(stashRow, items, this.client), item };
+    const stashRow = await this.touchStashUpdatedAt();
+    const item = mapStashItemRow(row, this.client);
+    return {
+      stash: withTouchedStash(stash, stashRow, [...stash.items, item]),
+      item,
+    };
   }
 
   async updateItem(
@@ -237,7 +216,7 @@ class SupabaseStashRepository implements StashRepository {
     itemId: string,
     updates: UpdateItemInput
   ): Promise<Stash> {
-    const userId = await this.requireUserId();
+    const userId = await this.getUserId();
     const existing = stash.items.find((item) => item.id === itemId);
     if (!existing) {
       throw new Error(`Item not found (${itemId})`);
@@ -255,6 +234,7 @@ class SupabaseStashRepository implements StashRepository {
 
     let uploadedPath: string | null = null;
     let shouldRemoveOld = false;
+    let nextImagePath = existing.imagePath;
 
     if ("imageDataUrl" in updates) {
       if (isDataUrl(updates.imageDataUrl)) {
@@ -263,24 +243,29 @@ class SupabaseStashRepository implements StashRepository {
           userId,
           this.stashId,
           itemId,
-          updates.imageDataUrl!
+          updates.imageDataUrl
         );
         patch.image_path = uploadedPath;
+        nextImagePath = uploadedPath;
         shouldRemoveOld =
           Boolean(existing.imagePath) && existing.imagePath !== uploadedPath;
       } else if (!updates.imageDataUrl) {
         patch.image_path = null;
+        nextImagePath = undefined;
         shouldRemoveOld = Boolean(existing.imagePath);
       }
       // http(s) public URL → keep existing image_path (no patch)
     }
 
+    let updatedRow: StashItemRow | null = null;
     if (Object.keys(patch).length > 0) {
-      const { error } = await this.client
+      const { data, error } = await this.client
         .from("stash_items")
         .update(patch)
         .eq("id", itemId)
-        .eq("stash_id", this.stashId);
+        .eq("stash_id", this.stashId)
+        .select("*")
+        .maybeSingle();
 
       if (error) {
         if (uploadedPath) {
@@ -290,6 +275,7 @@ class SupabaseStashRepository implements StashRepository {
         }
         throw new Error(`Failed to update item: ${error.message}`);
       }
+      updatedRow = data;
     }
 
     if (shouldRemoveOld && existing.imagePath) {
@@ -298,13 +284,30 @@ class SupabaseStashRepository implements StashRepository {
       );
     }
 
-    await this.touchStashUpdatedAt();
+    const stashRow = await this.touchStashUpdatedAt();
+    const nextItem: StashItem = updatedRow
+      ? mapStashItemRow(updatedRow, this.client)
+      : {
+          ...existing,
+          ...updates,
+          imagePath: nextImagePath,
+          imageDataUrl: nextImagePath
+            ? getStashImagePublicUrl(
+                this.client,
+                nextImagePath,
+                stashRow.updated_at
+              )
+            : updates.imageDataUrl === undefined
+              ? existing.imageDataUrl
+              : updates.imageDataUrl || undefined,
+          updatedAt: stashRow.updated_at,
+        };
 
-    const reloaded = await this.getStash();
-    if (!reloaded) {
-      throw new StashNotFoundError(this.stashId);
-    }
-    return reloaded;
+    return withTouchedStash(
+      stash,
+      stashRow,
+      stash.items.map((item) => (item.id === itemId ? nextItem : item))
+    );
   }
 
   async deleteItem(stash: Stash, itemId: string): Promise<Stash> {
@@ -326,13 +329,12 @@ class SupabaseStashRepository implements StashRepository {
       );
     }
 
-    await this.touchStashUpdatedAt();
-
-    const reloaded = await this.getStash();
-    if (!reloaded) {
-      throw new StashNotFoundError(this.stashId);
-    }
-    return reloaded;
+    const stashRow = await this.touchStashUpdatedAt();
+    return withTouchedStash(
+      stash,
+      stashRow,
+      stash.items.filter((item) => item.id !== itemId)
+    );
   }
 }
 

@@ -1,13 +1,6 @@
-const MIGRATION_FLAG_KEY = "stash:anon-migrated-at";
+import { getLocalStorage } from "@/lib/browser/localStorage";
 
-function getLocalStorage(): Storage | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return window.localStorage;
-  } catch {
-    return null;
-  }
-}
+const MIGRATION_FLAG_KEY = "stash:anon-migrated-at";
 
 /** Returns true if this device already completed (or declined) anon import. */
 export function hasCompletedAnonMigration(): boolean {

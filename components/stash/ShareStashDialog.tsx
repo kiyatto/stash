@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy, Link2, Loader2, Share } from "lucide-react";
 import {
   Dialog,
@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { createClient } from "@/lib/supabase/client";
+import { getStorageErrorMessage } from "@/lib/storage/errors";
 import {
   buildShareUrl,
   enableStashSharing,
@@ -33,27 +34,27 @@ function ShareStashDialogBody({
   stashId: string;
   onOpenChange: (open: boolean) => void;
 }) {
+  const client = useMemo(() => createClient(), []);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [copied, setCopied] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
+  const copiedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
 
     void (async () => {
       try {
-        const current = await getOwnedShareToken(createClient(), stashId);
+        const current = await getOwnedShareToken(client, stashId);
         if (cancelled) return;
         setToken(current);
         setLoadError(null);
       } catch (err) {
         if (cancelled) return;
-        setLoadError(
-          err instanceof Error ? err.message : "Could not load share status."
-        );
+        setLoadError(getStorageErrorMessage(err));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -62,28 +63,35 @@ function ShareStashDialogBody({
     return () => {
       cancelled = true;
     };
-  }, [stashId]);
+  }, [client, stashId]);
+
+  useEffect(() => {
+    return () => {
+      if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    };
+  }, []);
 
   const shareUrl =
     typeof window !== "undefined" && token
       ? buildShareUrl(window.location.origin, token)
       : "";
 
+  async function copyUrl(url: string) {
+    await navigator.clipboard.writeText(url);
+    setCopied(true);
+    if (copiedTimerRef.current) clearTimeout(copiedTimerRef.current);
+    copiedTimerRef.current = setTimeout(() => setCopied(false), 2000);
+  }
+
   async function handleEnableAndCopy() {
     setBusy(true);
     setActionError(null);
     try {
-      const nextToken = await enableStashSharing(createClient(), stashId);
+      const nextToken = await enableStashSharing(client, stashId);
       setToken(nextToken);
-      await navigator.clipboard.writeText(
-        buildShareUrl(window.location.origin, nextToken)
-      );
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
+      await copyUrl(buildShareUrl(window.location.origin, nextToken));
     } catch (err) {
-      setActionError(
-        err instanceof Error ? err.message : "Could not create share link."
-      );
+      setActionError(getStorageErrorMessage(err));
     } finally {
       setBusy(false);
     }
@@ -97,11 +105,7 @@ function ShareStashDialogBody({
     setBusy(true);
     setActionError(null);
     try {
-      await navigator.clipboard.writeText(
-        buildShareUrl(window.location.origin, token)
-      );
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
+      await copyUrl(buildShareUrl(window.location.origin, token));
     } catch {
       setActionError("Could not copy to clipboard.");
     } finally {
@@ -120,13 +124,11 @@ function ShareStashDialogBody({
     setBusy(true);
     setActionError(null);
     try {
-      await revokeStashSharing(createClient(), stashId);
+      await revokeStashSharing(client, stashId);
       setToken(null);
       setCopied(false);
     } catch (err) {
-      setActionError(
-        err instanceof Error ? err.message : "Could not revoke share link."
-      );
+      setActionError(getStorageErrorMessage(err));
     } finally {
       setBusy(false);
     }

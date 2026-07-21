@@ -2,7 +2,7 @@ import { notFound } from "next/navigation";
 import { OwnedStashCanvas } from "@/components/canvas/OwnedStashCanvas";
 import { StashPageHeader } from "@/components/stash/StashPageHeader";
 import { createClient } from "@/lib/supabase/server";
-import { getCurrentUser } from "@/lib/supabase/user";
+import { isSupabaseConfigured } from "@/lib/supabase/env";
 
 type StashPageProps = {
   params: Promise<{ id: string }>;
@@ -10,13 +10,19 @@ type StashPageProps = {
 
 export default async function StashPage({ params }: StashPageProps) {
   const { id } = await params;
-  const user = await getCurrentUser();
+  if (!isSupabaseConfigured()) {
+    notFound();
+  }
+
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   if (!user) {
     notFound();
   }
 
-  const supabase = await createClient();
   const { data: stash, error } = await supabase
     .from("stashes")
     .select("id, name")

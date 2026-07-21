@@ -34,9 +34,11 @@ describe("getStorageErrorMessage", () => {
     );
   });
 
-  it("returns a generic fallback message", () => {
-    expect(getStorageErrorMessage(new Error("boom"))).toMatch(
-      /something went wrong/i
-    );
+  it("returns the underlying error message when available", () => {
+    expect(getStorageErrorMessage(new Error("boom"))).toBe("boom");
+  });
+
+  it("returns a generic fallback for non-Error values", () => {
+    expect(getStorageErrorMessage("boom")).toMatch(/something went wrong/i);
   });
 });

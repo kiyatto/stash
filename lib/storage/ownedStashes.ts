@@ -1,6 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
 import { MAX_STASHES_PER_USER } from "@/lib/supabase/constants";
+import { requireUserId } from "@/lib/supabase/requireUserId";
 import {
   getStashImagePublicUrl,
   removeStashImageFolder,
@@ -107,24 +108,13 @@ function isLimitError(message: string): boolean {
   return /stash limit reached/i.test(message);
 }
 
-async function requireUserId(client: Client): Promise<string> {
-  const {
-    data: { user },
-    error,
-  } = await client.auth.getUser();
-
-  if (error || !user) {
-    throw new Error("You must be signed in to manage stashes.");
-  }
-
-  return user.id;
-}
+const AUTH_MESSAGE = "You must be signed in to manage stashes.";
 
 /** Lists stashes owned by the current user (newest first). */
 export async function listOwnedStashes(
   client: Client
 ): Promise<StashSummary[]> {
-  const userId = await requireUserId(client);
+  const userId = await requireUserId(client, AUTH_MESSAGE);
 
   const { data, error } = await client
     .from("stashes")
@@ -144,7 +134,7 @@ export async function createOwnedStash(
   client: Client,
   name = "My Stash"
 ): Promise<StashSummary> {
-  const userId = await requireUserId(client);
+  const userId = await requireUserId(client, AUTH_MESSAGE);
 
   const { count, error: countError } = await client
     .from("stashes")
@@ -180,7 +170,7 @@ export async function renameOwnedStash(
   stashId: string,
   name: string
 ): Promise<StashSummary> {
-  const userId = await requireUserId(client);
+  const userId = await requireUserId(client, AUTH_MESSAGE);
   const trimmed = name.trim();
   if (!trimmed) {
     throw new Error("Stash name cannot be empty.");
@@ -211,7 +201,7 @@ export async function deleteOwnedStash(
   client: Client,
   stashId: string
 ): Promise<void> {
-  const userId = await requireUserId(client);
+  const userId = await requireUserId(client, AUTH_MESSAGE);
 
   const { data, error } = await client
     .from("stashes")
@@ -236,29 +226,3 @@ export async function deleteOwnedStash(
   }
 }
 
-/** Loads a stash row owned by the current user, or throws. */
-export async function getOwnedStashRow(
-  client: Client,
-  stashId: string
-): Promise<StashSummary> {
-  const userId = await requireUserId(client);
-
-  const { data, error } = await client
-    .from("stashes")
-    .select("*, stash_items(count)")
-    .eq("id", stashId)
-    .eq("owner_id", userId)
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(`Failed to load stash: ${error.message}`);
-  }
-  if (!data) {
-    throw new StashNotFoundError(stashId);
-  }
-
-  const [summary] = await attachEarliestItemPreviews(client, [
-    mapSummary(data),
-  ]);
-  return summary!;
-}

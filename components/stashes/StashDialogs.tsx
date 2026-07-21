@@ -213,7 +213,7 @@ export function ProfileEditorDialog({
       <DialogContent className="sm:max-w-md">
         {open ? (
           <ProfileEditorForm
-            key={`${profile.id}-${profile.updated_at}-${profile.avatar_url}`}
+            key={profile.id}
             profile={profile}
             client={client}
             onOpenChange={onOpenChange}

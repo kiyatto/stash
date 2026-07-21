@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { getStorageErrorMessage } from "@/lib/storage/errors";
 import { renameOwnedStash } from "@/lib/storage/ownedStashes";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
@@ -16,6 +17,7 @@ export function EditableStashName({
   initialName,
   className,
 }: EditableStashNameProps) {
+  const client = useMemo(() => createClient(), []);
   const [name, setName] = useState(initialName);
   const [draft, setDraft] = useState(initialName);
   const [editing, setEditing] = useState(false);
@@ -66,12 +68,12 @@ export function EditableStashName({
     setSaving(true);
     setError(null);
     try {
-      const updated = await renameOwnedStash(createClient(), stashId, trimmed);
+      const updated = await renameOwnedStash(client, stashId, trimmed);
       setName(updated.name);
       setDraft(updated.name);
       setEditing(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not rename stash.");
+      setError(getStorageErrorMessage(err));
       inputRef.current?.focus();
     } finally {
       setSaving(false);

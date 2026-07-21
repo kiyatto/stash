@@ -2,6 +2,14 @@ import { MAX_IMAGE_BYTES } from "@/lib/types";
 
 const MAX_DIMENSION = 1600;
 
+/** Maps a MIME type to a short file extension used for storage object paths. */
+export function mimeToExt(mime: string): string {
+  if (mime === "image/png") return "png";
+  if (mime === "image/webp") return "webp";
+  if (mime === "image/gif") return "gif";
+  return "jpg";
+}
+
 function readFileAsDataUrl(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();

@@ -21,6 +21,9 @@ describe("StashItemNode", () => {
         type="stashItem"
         selected={false}
         dragging={false}
+        draggable
+        selectable
+        deletable
         zIndex={0}
         isConnectable={false}
         positionAbsoluteX={item.x}
@@ -49,6 +52,9 @@ describe("StashItemNode", () => {
         type="stashItem"
         selected={false}
         dragging={false}
+        draggable
+        selectable
+        deletable
         zIndex={0}
         isConnectable={false}
         positionAbsoluteX={item.x}
@@ -77,6 +83,9 @@ describe("StashItemNode", () => {
         type="stashItem"
         selected={false}
         dragging={false}
+        draggable
+        selectable
+        deletable
         zIndex={0}
         isConnectable={false}
         positionAbsoluteX={item.x}

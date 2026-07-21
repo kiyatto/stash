@@ -6,6 +6,7 @@ import {
   StashLimitError,
   StashNotFoundError,
 } from "@/lib/storage/ownedStashes";
+import { ShareNotFoundError } from "@/lib/storage/sharing";
 
 export function getStorageErrorMessage(error: unknown): string {
   if (error instanceof StorageQuotaError) {
@@ -20,11 +21,17 @@ export function getStorageErrorMessage(error: unknown): string {
   if (error instanceof StashNotFoundError) {
     return "This stash could not be found. It may have been deleted.";
   }
+  if (error instanceof ShareNotFoundError) {
+    return "This share link is invalid or has been revoked.";
+  }
   if (error instanceof Error && /image exceeds/i.test(error.message)) {
     return "That image is too large. Try a smaller file (2MB max).";
   }
   if (error instanceof Error && /failed to upload image/i.test(error.message)) {
     return "Could not upload the image. Check your connection and try again.";
+  }
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
   }
   return "Something went wrong saving your stash. Try again.";
 }
