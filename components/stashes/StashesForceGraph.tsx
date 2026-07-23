@@ -42,7 +42,6 @@ const ForceGraph2D = dynamic(() => import("react-force-graph-2d"), {
 });
 
 type StashesForceGraphProps = {
-  userId: string;
   profile: GraphProfile;
   stashes: StashSummary[];
   width: number;
@@ -53,7 +52,6 @@ type StashesForceGraphProps = {
 };
 
 export function StashesForceGraph({
-  userId: _userId,
   profile,
   stashes,
   width,

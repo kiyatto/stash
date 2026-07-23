@@ -230,7 +230,6 @@ export function StashesHome() {
         ) : null}
         <StashesForceGraph
           key={profile.id}
-          userId={profile.id}
           profile={graphProfile}
           stashes={stashes}
           width={size.width}
