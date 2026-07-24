@@ -257,7 +257,9 @@ function StashEditorForm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [coverOptions, setCoverOptions] = useState<StashCoverOption[]>([]);
-  const [coverLoading, setCoverLoading] = useState(false);
+  const [coverLoading, setCoverLoading] = useState(
+    () => mode === "rename" && Boolean(loadCoverOptions)
+  );
   const [selectedCover, setSelectedCover] = useState<string | null>(
     coverImagePath ?? null
   );
@@ -265,7 +267,6 @@ function StashEditorForm({
   useEffect(() => {
     if (mode !== "rename" || !loadCoverOptions) return;
     let cancelled = false;
-    setCoverLoading(true);
     void loadCoverOptions()
       .then((options) => {
         if (!cancelled) setCoverOptions(options);
