@@ -17,15 +17,37 @@ import { getStorageErrorMessage } from "@/lib/storage/errors";
 import {
   buildShareUrl,
   enableStashSharing,
-  getOwnedShareToken,
+  expiresAtFromPreset,
+  getOwnedShareStatus,
   revokeStashSharing,
+  updateShareExpiry,
+  type ShareExpiryPreset,
 } from "@/lib/storage/sharing";
+import { cn } from "@/lib/utils";
 
 type ShareStashDialogProps = {
   open: boolean;
   stashId: string;
   onOpenChange: (open: boolean) => void;
 };
+
+const EXPIRY_OPTIONS: { value: ShareExpiryPreset; label: string }[] = [
+  { value: "7d", label: "7 days" },
+  { value: "30d", label: "30 days" },
+  { value: "never", label: "Never" },
+];
+
+function formatExpiryLabel(expiresAt: string | null): string {
+  if (!expiresAt) return "No expiry";
+  const date = new Date(expiresAt);
+  if (Number.isNaN(date.getTime())) return "No expiry";
+  if (date.getTime() <= Date.now()) return "Expired";
+  return `Expires ${date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "short",
+    day: "numeric",
+  })}`;
+}
 
 function ShareStashDialogBody({
   stashId,
@@ -36,6 +58,8 @@ function ShareStashDialogBody({
 }) {
   const client = useMemo(() => createClient(), []);
   const [token, setToken] = useState<string | null>(null);
+  const [expiresAt, setExpiresAt] = useState<string | null>(null);
+  const [preset, setPreset] = useState<ShareExpiryPreset>("never");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -48,9 +72,24 @@ function ShareStashDialogBody({
 
     void (async () => {
       try {
-        const current = await getOwnedShareToken(client, stashId);
+        const status = await getOwnedShareStatus(client, stashId);
         if (cancelled) return;
-        setToken(current);
+        setToken(status.token);
+        setExpiresAt(status.expiresAt);
+        if (!status.expiresAt) {
+          setPreset("never");
+        } else {
+          const remaining =
+            new Date(status.expiresAt).getTime() - Date.now();
+          const seven = 7 * 24 * 60 * 60 * 1000;
+          const thirty = 30 * 24 * 60 * 60 * 1000;
+          setPreset(
+            remaining <= 0 ||
+              Math.abs(remaining - seven) <= Math.abs(remaining - thirty)
+              ? "7d"
+              : "30d"
+          );
+        }
         setLoadError(null);
       } catch (err) {
         if (cancelled) return;
@@ -87,8 +126,12 @@ function ShareStashDialogBody({
     setBusy(true);
     setActionError(null);
     try {
-      const nextToken = await enableStashSharing(client, stashId);
+      const nextToken = await enableStashSharing(client, stashId, {
+        expiresAt: expiresAtFromPreset(preset),
+      });
       setToken(nextToken);
+      const status = await getOwnedShareStatus(client, stashId);
+      setExpiresAt(status.expiresAt);
       await copyUrl(buildShareUrl(window.location.origin, nextToken));
     } catch (err) {
       setActionError(getStorageErrorMessage(err));
@@ -113,6 +156,26 @@ function ShareStashDialogBody({
     }
   }
 
+  async function handlePresetChange(next: ShareExpiryPreset) {
+    setPreset(next);
+    if (!token) return;
+
+    setBusy(true);
+    setActionError(null);
+    try {
+      const status = await updateShareExpiry(
+        client,
+        stashId,
+        expiresAtFromPreset(next)
+      );
+      setExpiresAt(status.expiresAt);
+    } catch (err) {
+      setActionError(getStorageErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleRevoke() {
     if (
       !window.confirm(
@@ -126,6 +189,8 @@ function ShareStashDialogBody({
     try {
       await revokeStashSharing(client, stashId);
       setToken(null);
+      setExpiresAt(null);
+      setPreset("never");
       setCopied(false);
     } catch (err) {
       setActionError(getStorageErrorMessage(err));
@@ -154,7 +219,7 @@ function ShareStashDialogBody({
           </span>
         </div>
       ) : (
-        <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-4">
           <div className="flex items-center gap-2 rounded-md border border-border/60 bg-muted/30 px-3 py-2">
             <Link2 className="h-4 w-4 shrink-0 stroke-[1.5] text-muted-foreground" />
             <Input
@@ -166,6 +231,35 @@ function ShareStashDialogBody({
               className="border-0 bg-transparent px-0 font-mono text-xs shadow-none focus-visible:ring-0"
               aria-label="Share link"
             />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <p className="font-mono text-[10px] uppercase tracking-widest text-muted-foreground">
+              Link expires
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {EXPIRY_OPTIONS.map((option) => (
+                <Button
+                  key={option.value}
+                  type="button"
+                  size="sm"
+                  variant={preset === option.value ? "default" : "outline"}
+                  className={cn(
+                    "font-mono text-[10px] uppercase tracking-widest",
+                    preset === option.value ? "" : "text-muted-foreground"
+                  )}
+                  onClick={() => void handlePresetChange(option.value)}
+                  disabled={busy || loading || Boolean(loadError)}
+                >
+                  {option.label}
+                </Button>
+              ))}
+            </div>
+            {token ? (
+              <p className="font-mono text-xs text-muted-foreground">
+                {formatExpiryLabel(expiresAt)}
+              </p>
+            ) : null}
           </div>
 
           {loadError || actionError ? (

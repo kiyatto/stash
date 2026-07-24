@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ImageIcon, Loader2, Trash2, X } from "lucide-react";
 import {
   Dialog,
@@ -16,6 +16,8 @@ import type { Profile } from "@/lib/supabase/database.types";
 import { getAvatarPublicUrl, seedToColor } from "@/lib/supabase/profile";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/supabase/database.types";
+import type { StashCoverOption } from "@/lib/storage/ownedStashes";
+import { cn } from "@/lib/utils";
 
 type Client = SupabaseClient<Database>;
 
@@ -235,6 +237,10 @@ type StashEditorDialogProps = {
   onOpenChange: (open: boolean) => void;
   onSave: (name: string) => Promise<void>;
   onDelete?: () => Promise<void>;
+  /** Rename mode only: current cover path (null = auto default). */
+  coverImagePath?: string | null;
+  loadCoverOptions?: () => Promise<StashCoverOption[]>;
+  onSetCover?: (imagePath: string | null) => Promise<void>;
 };
 
 function StashEditorForm({
@@ -243,10 +249,41 @@ function StashEditorForm({
   onOpenChange,
   onSave,
   onDelete,
+  coverImagePath,
+  loadCoverOptions,
+  onSetCover,
 }: Omit<StashEditorDialogProps, "open">) {
   const [name, setName] = useState(initialName);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [coverOptions, setCoverOptions] = useState<StashCoverOption[]>([]);
+  const [coverLoading, setCoverLoading] = useState(false);
+  const [selectedCover, setSelectedCover] = useState<string | null>(
+    coverImagePath ?? null
+  );
+
+  useEffect(() => {
+    if (mode !== "rename" || !loadCoverOptions) return;
+    let cancelled = false;
+    setCoverLoading(true);
+    void loadCoverOptions()
+      .then((options) => {
+        if (!cancelled) setCoverOptions(options);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setError(
+            err instanceof Error ? err.message : "Could not load cover images."
+          );
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setCoverLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, loadCoverOptions]);
 
   async function handleSave() {
     const trimmed = name.trim();
@@ -281,11 +318,25 @@ function StashEditorForm({
     }
   }
 
+  async function handleSelectCover(imagePath: string | null) {
+    if (!onSetCover) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await onSetCover(imagePath);
+      setSelectedCover(imagePath);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update cover.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <>
       <DialogHeader>
         <DialogTitle className="font-serif text-2xl font-normal italic">
-          {mode === "create" ? "New stash" : "Rename stash"}
+          {mode === "create" ? "New stash" : "Edit stash"}
         </DialogTitle>
       </DialogHeader>
 
@@ -309,6 +360,68 @@ function StashEditorForm({
           }}
         />
       </div>
+
+      {mode === "rename" && onSetCover ? (
+        <div className="flex flex-col gap-2">
+          <p className="font-mono text-[11px] uppercase tracking-widest text-muted-foreground">
+            Cover image
+          </p>
+          {coverLoading ? (
+            <div className="flex items-center gap-2 py-2 text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="font-mono text-xs uppercase tracking-widest">
+                Loading images…
+              </span>
+            </div>
+          ) : coverOptions.length === 0 ? (
+            <p className="font-mono text-xs text-muted-foreground">
+              Add an image to an item to choose a cover.
+            </p>
+          ) : (
+            <>
+              <div className="grid grid-cols-3 gap-2">
+                {coverOptions.map((option) => {
+                  const selected = selectedCover === option.imagePath;
+                  return (
+                    <button
+                      key={option.itemId}
+                      type="button"
+                      disabled={busy}
+                      onClick={() => void handleSelectCover(option.imagePath)}
+                      className={cn(
+                        "relative aspect-square overflow-hidden rounded-md border bg-muted/40 transition-colors",
+                        selected
+                          ? "border-foreground ring-1 ring-foreground"
+                          : "border-border/60 hover:border-foreground/40"
+                      )}
+                      title={option.name}
+                      aria-label={`Use ${option.name} as cover`}
+                      aria-pressed={selected}
+                    >
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={option.imageUrl}
+                        alt=""
+                        className="h-full w-full object-cover"
+                      />
+                    </button>
+                  );
+                })}
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="self-start font-mono text-[10px] uppercase tracking-widest text-muted-foreground"
+                disabled={busy || selectedCover === null}
+                onClick={() => void handleSelectCover(null)}
+              >
+                Use default (first image)
+              </Button>
+            </>
+          )}
+        </div>
+      ) : null}
 
       {error ? (
         <p className="font-mono text-xs text-destructive" role="alert">
@@ -362,18 +475,24 @@ export function StashEditorDialog({
   onOpenChange,
   onSave,
   onDelete,
+  coverImagePath,
+  loadCoverOptions,
+  onSetCover,
 }: StashEditorDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md">
         {open ? (
           <StashEditorForm
-            key={`${mode}-${initialName}`}
+            key={`${mode}-${initialName}-${coverImagePath ?? "auto"}`}
             mode={mode}
             initialName={initialName}
             onOpenChange={onOpenChange}
             onSave={onSave}
             onDelete={onDelete}
+            coverImagePath={coverImagePath}
+            loadCoverOptions={loadCoverOptions}
+            onSetCover={onSetCover}
           />
         ) : null}
       </DialogContent>

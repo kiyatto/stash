@@ -35,8 +35,17 @@ export type StashSummary = {
   createdAt: string;
   updatedAt: string;
   itemCount: number;
-  /** Public URL for the earliest-created item's image, when present. */
+  /** Explicit cover path when set; null means use auto first-image default. */
+  coverImagePath?: string | null;
+  /** Public URL for cover or first item image, when present. */
   previewImageUrl?: string;
+};
+
+export type StashCoverOption = {
+  itemId: string;
+  imagePath: string;
+  imageUrl: string;
+  name: string;
 };
 
 type StashRowWithCount = Database["public"]["Tables"]["stashes"]["Row"] & {
@@ -51,54 +60,71 @@ function mapSummary(row: StashRowWithCount): StashSummary {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     itemCount: countEntry?.count ?? 0,
+    coverImagePath: row.cover_image_path,
   };
 }
 
 /**
- * Attaches each stash's earliest-created item image (by `created_at`) when that
- * item has an `image_path`. Later items are ignored even if they have images.
+ * Resolves preview URLs: explicit cover_image_path wins; otherwise the first
+ * item (by created_at) that has an image_path.
  */
-async function attachEarliestItemPreviews(
+async function attachPreviews(
   client: Client,
   summaries: StashSummary[]
 ): Promise<StashSummary[]> {
   if (summaries.length === 0) return summaries;
+
+  const withCover = summaries.map((stash) => {
+    if (!stash.coverImagePath) return stash;
+    return {
+      ...stash,
+      previewImageUrl: getStashImagePublicUrl(
+        client,
+        stash.coverImagePath,
+        stash.updatedAt
+      ),
+    };
+  });
+
+  const needingAuto = withCover.filter((stash) => !stash.coverImagePath);
+  if (needingAuto.length === 0) return withCover;
 
   const { data, error } = await client
     .from("stash_items")
     .select("stash_id, image_path, updated_at, created_at")
     .in(
       "stash_id",
-      summaries.map((stash) => stash.id)
+      needingAuto.map((stash) => stash.id)
     )
+    .not("image_path", "is", null)
     .order("created_at", { ascending: true });
 
   if (error) {
     throw new Error(`Failed to load stash previews: ${error.message}`);
   }
 
-  const earliestByStash = new Map<
+  const firstImageByStash = new Map<
     string,
-    { image_path: string | null; updated_at: string }
+    { image_path: string; updated_at: string }
   >();
   for (const row of data ?? []) {
-    if (earliestByStash.has(row.stash_id)) continue;
-    earliestByStash.set(row.stash_id, {
+    if (!row.image_path || firstImageByStash.has(row.stash_id)) continue;
+    firstImageByStash.set(row.stash_id, {
       image_path: row.image_path,
       updated_at: row.updated_at,
     });
   }
 
-  return summaries.map((stash) => {
-    const earliest = earliestByStash.get(stash.id);
-    const path = earliest?.image_path;
-    if (!path) return stash;
+  return withCover.map((stash) => {
+    if (stash.previewImageUrl) return stash;
+    const first = firstImageByStash.get(stash.id);
+    if (!first) return stash;
     return {
       ...stash,
       previewImageUrl: getStashImagePublicUrl(
         client,
-        path,
-        earliest.updated_at
+        first.image_path,
+        first.updated_at
       ),
     };
   });
@@ -126,7 +152,7 @@ export async function listOwnedStashes(
     throw new Error(`Failed to list stashes: ${error.message}`);
   }
 
-  return attachEarliestItemPreviews(client, (data ?? []).map(mapSummary));
+  return attachPreviews(client, (data ?? []).map(mapSummary));
 }
 
 /** Creates a new stash. Does not auto-create on login — callers must opt in. */
@@ -191,9 +217,97 @@ export async function renameOwnedStash(
     throw new StashNotFoundError(stashId);
   }
 
-  const [summary] = await attachEarliestItemPreviews(client, [
-    mapSummary(data),
-  ]);
+  const [summary] = await attachPreviews(client, [mapSummary(data)]);
+  return summary!;
+}
+
+/** Lists item images that can be chosen as a stash cover. */
+export async function listStashCoverOptions(
+  client: Client,
+  stashId: string
+): Promise<StashCoverOption[]> {
+  const userId = await requireUserId(client, AUTH_MESSAGE);
+
+  const { data: stash, error: stashError } = await client
+    .from("stashes")
+    .select("id")
+    .eq("id", stashId)
+    .eq("owner_id", userId)
+    .maybeSingle();
+
+  if (stashError) {
+    throw new Error(`Failed to verify stash: ${stashError.message}`);
+  }
+  if (!stash) {
+    throw new StashNotFoundError(stashId);
+  }
+
+  const { data, error } = await client
+    .from("stash_items")
+    .select("id, name, image_path, updated_at")
+    .eq("stash_id", stashId)
+    .not("image_path", "is", null)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw new Error(`Failed to load cover options: ${error.message}`);
+  }
+
+  return (data ?? [])
+    .filter((row): row is typeof row & { image_path: string } =>
+      Boolean(row.image_path)
+    )
+    .map((row) => ({
+      itemId: row.id,
+      imagePath: row.image_path,
+      imageUrl: getStashImagePublicUrl(client, row.image_path, row.updated_at),
+      name: row.name || "Untitled",
+    }));
+}
+
+/**
+ * Sets an explicit cover from an item image path, or clears to the auto default
+ * when `imagePath` is null.
+ */
+export async function setStashCoverImage(
+  client: Client,
+  stashId: string,
+  imagePath: string | null
+): Promise<StashSummary> {
+  const userId = await requireUserId(client, AUTH_MESSAGE);
+
+  if (imagePath) {
+    const { data: item, error: itemError } = await client
+      .from("stash_items")
+      .select("id, image_path")
+      .eq("stash_id", stashId)
+      .eq("image_path", imagePath)
+      .maybeSingle();
+
+    if (itemError) {
+      throw new Error(`Failed to verify cover image: ${itemError.message}`);
+    }
+    if (!item) {
+      throw new Error("Cover image must belong to an item in this stash.");
+    }
+  }
+
+  const { data, error } = await client
+    .from("stashes")
+    .update({ cover_image_path: imagePath })
+    .eq("id", stashId)
+    .eq("owner_id", userId)
+    .select("*, stash_items(count)")
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Failed to update stash cover: ${error.message}`);
+  }
+  if (!data) {
+    throw new StashNotFoundError(stashId);
+  }
+
+  const [summary] = await attachPreviews(client, [mapSummary(data)]);
   return summary!;
 }
 
@@ -225,4 +339,3 @@ export async function deleteOwnedStash(
     // Orphaned objects can be cleaned later; stash delete already succeeded.
   }
 }
-

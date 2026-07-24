@@ -25,7 +25,9 @@ import {
   createOwnedStash,
   deleteOwnedStash,
   listOwnedStashes,
+  listStashCoverOptions,
   renameOwnedStash,
+  setStashCoverImage,
   type StashSummary,
 } from "@/lib/storage/ownedStashes";
 import { MAX_STASHES_PER_USER } from "@/lib/supabase/constants";
@@ -48,6 +50,11 @@ export function StashesHome() {
   const [profileOpen, setProfileOpen] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [editingStash, setEditingStash] = useState<StashSummary | null>(null);
+
+  const loadEditingCoverOptions = useCallback(() => {
+    if (!editingStash) return Promise.resolve([]);
+    return listStashCoverOptions(client, editingStash.id);
+  }, [client, editingStash]);
 
   const [importOpen, setImportOpen] = useState(false);
   const [importItemCount, setImportItemCount] = useState(0);
@@ -211,7 +218,7 @@ export function StashesHome() {
             </p>
           ) : (
             <p className="max-w-[14rem] text-right font-mono text-[10px] leading-relaxed text-muted-foreground/70">
-              Click a stash to open · click its title to rename
+              Click a stash to open · click its title to edit
             </p>
           )}
         </div>
@@ -274,9 +281,32 @@ export function StashesHome() {
         open={editingStash !== null}
         mode="rename"
         initialName={editingStash?.name ?? ""}
+        coverImagePath={editingStash?.coverImagePath}
         onOpenChange={(open) => {
           if (!open) setEditingStash(null);
         }}
+        loadCoverOptions={
+          editingStash ? loadEditingCoverOptions : undefined
+        }
+        onSetCover={
+          editingStash
+            ? async (imagePath) => {
+                try {
+                  const updated = await setStashCoverImage(
+                    client,
+                    editingStash.id,
+                    imagePath
+                  );
+                  setStashes((prev) =>
+                    prev.map((s) => (s.id === updated.id ? updated : s))
+                  );
+                  setEditingStash(updated);
+                } catch (err) {
+                  throw new Error(getStorageErrorMessage(err));
+                }
+              }
+            : undefined
+        }
         onSave={async (name) => {
           if (!editingStash) return;
           try {
@@ -291,7 +321,6 @@ export function StashesHome() {
                   ? {
                       ...s,
                       ...updated,
-                      // Rename response does not re-fetch the preview image.
                       previewImageUrl:
                         updated.previewImageUrl ?? s.previewImageUrl,
                     }

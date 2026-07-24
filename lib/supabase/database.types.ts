@@ -46,6 +46,8 @@ export type Database = {
           owner_id: string;
           name: string;
           share_token: string | null;
+          share_expires_at: string | null;
+          cover_image_path: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -54,6 +56,8 @@ export type Database = {
           owner_id: string;
           name?: string;
           share_token?: string | null;
+          share_expires_at?: string | null;
+          cover_image_path?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -62,6 +66,8 @@ export type Database = {
           owner_id?: string;
           name?: string;
           share_token?: string | null;
+          share_expires_at?: string | null;
+          cover_image_path?: string | null;
           created_at?: string;
           updated_at?: string;
         };
